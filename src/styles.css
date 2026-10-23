@@ -38,3 +38,32 @@ input { width: 100%; border: 1px solid #3b4a5f; border-radius: 8px; background: 
 .notice { background: #25384a; color: #cde5ff; border: 1px solid #3b5e7c; padding: 10px; border-radius: 10px; font-size: 11px; margin: 10px 0; overflow-wrap: anywhere; }
 footer { color: #74869c; font-size: 9px; text-align: center; padding: 10px 0 2px; }
 @media (max-width: 390px) { .app-shell { padding: 10px; } .avatar-panel { grid-template-columns: 38% 62%; } .speech-card { font-size: 11px; } }
+.input-action { display: flex; gap: 7px; }
+.input-action input { flex: 1; }
+.date-time-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.check-setting { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; margin: 10px 0; }
+.check-setting input { width: 16px; height: 16px; }
+input[type="range"] { padding: 5px 0; }
+.notice.error { border-color: #8b4d54; color: #ffd5d8; background: #42272d; }
+.overlay-shell { width: 390px; height: 330px; padding: 0 12px 12px; display: grid; grid-template-columns: 130px 1fr; align-items: end; gap: 8px; background: transparent; color: #eef3fa; }
+.overlay-character { height: 280px; overflow: hidden; }
+.overlay-character .avatar-canvas { width: 130px; height: 270px; min-height: 0; }
+.overlay-card { align-self: end; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 15px; background: rgba(17,24,35,.96); box-shadow: 0 12px 38px rgba(0,0,0,.42); font-size: 12px; }
+.overlay-card p { color: #d0deee; line-height: 1.45; margin: 8px 0; }
+.overlay-card small { color: #8fbff0; }
+.overlay-card .response-row button { font-size: 10px; }
+.calendar-options { max-height: 190px; overflow: auto; margin: 8px 0 12px; border: 1px solid #334052; border-radius: 9px; padding: 6px 10px; }
+.calendar-option { align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #2b3849; }
+.calendar-option:last-child { border-bottom: 0; }
+.calendar-option span { display: grid; gap: 4px; min-width: 0; }
+.calendar-option strong { color: #eef3fa; font-size: 11px; overflow-wrap: anywhere; }
+.calendar-option small { color: #9cacc0; font-size: 9px; overflow-wrap: anywhere; }
+.calendar-panel h3 { font-size: 12px; margin: 14px 0 7px; }
+.calendar-event { align-items: flex-start; padding: 8px 0; }
+.calendar-event > div { display: grid; gap: 4px; min-width: 0; }
+.calendar-event small { line-height: 1.4; }
+.task-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+.task-filters button { text-transform: capitalize; font-size: 10px; padding: 6px 9px; }
+.task-filters button.selected { background: #2979d5; border-color: #2979d5; }
+.task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.task-actions button { font-size: 10px; white-space: nowrap; }

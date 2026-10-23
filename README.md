@@ -45,28 +45,29 @@ The OAuth callback uses `http://127.0.0.1:43827/oauth2callback`. If Google rejec
 
 This scaffold asks for read-only calendar access plus event creation. Review the current Google OAuth verification/testing rules before distributing the app.
 
-## Important starter limitations
+## Calendar reminders and task lifecycle
 
-- The reminder scheduler polls every 15 seconds and supports one-time reminders. Recurrence values are stored but recurring-task rescheduling is not yet implemented.
-- Reminders are marked `reminded` before displaying, preventing duplicates but not automatically retrying after a crash at that exact moment.
-- Google Calendar import currently displays upcoming events but does not yet persist them as local tasks or reconcile remote edits/deletions.
-- The first calendar sync path creates a new event; update/delete conflict handling and duplicate detection should be added before production.
+Events from selected calendars are imported into `calendar_events` and linked to reminder tasks by calendar ID plus Google event ID. Sync updates these reminders, marks cancelled events inactive, and runs at startup, after the app returns online, and every 15 minutes while the app is running. Recurring event instances are expanded by Google Calendar. All-day events use the configurable local reminder time (09:00 by default).
+
+Local reminders stay available when Google Calendar is disconnected. Completed reminders are archived one hour after completion; dismissed and cancelled reminders remain accessible under **All**. The scheduler runs while Avatar Reminder is open or minimized to the system tray. Choosing **Quit** stops the app, so reminders cannot fire while it is fully closed. Starting the app again rebuilds pending schedules and performs a calendar sync.
+
+## Other limitations
+
 - OAuth tokens are encrypted with Electron `safeStorage` where available. On systems where encryption is unavailable, this starter stores the token data as base64 text; production builds should instead fail closed or implement a stronger secure token store.
-- Speech uses the browser's installed system voices. Speech recognition, microphone permissions and a natural-language task parser are not included yet.
+- Speech and microphone recognition use browser-provided system features; recognition availability and transcription quality depend on the installed runtime and language services.
 - The avatar's procedural placeholder is only for layout testing, not a final character asset.
 
 ## Suggested next development steps
 
-1. Add recurring schedules and timezone-aware recurrence rules.
-2. Persist imported Google events and track sync tokens / `updated` timestamps.
-3. Add a settings page for quiet hours, voice, avatar position and startup behavior.
-4. Add microphone input and a task parser with a confirmation step before creating events.
-5. Add robust retry handling, structured logs, unit tests, and packaged Windows builds.
-6. Validate IPC sender and payloads, add a stricter production Content Security Policy, and audit dependencies before release.
+1. Add incremental Google sync tokens and remote event deletion reconciliation outside the selected date range.
+2. Add a supported Windows background/startup mechanism if reminders must fire after choosing Quit.
+3. Add robust retry handling, packaged Windows builds, and a stricter production Content Security Policy.
 
 ## Database tables
 
-- `tasks`: reminder definitions and status
+- `tasks`: local and calendar-linked reminders with lifecycle, schedule, snooze, completion, and expiry fields
 - `reminder_history`: each fired reminder and user response
 - `sync_log`: external sync operations and errors
 - `app_settings`: app preferences and encrypted OAuth token blob
+- `calendar_events`: source event metadata and stable calendar/event identifiers
+- `calendar_sync_state`: per-calendar incremental Google sync tokens
