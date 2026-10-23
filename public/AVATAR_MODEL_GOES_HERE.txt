@@ -1,0 +1,1 @@
+Place a licensed VRM character model here as avatar.vrm. See README.md.

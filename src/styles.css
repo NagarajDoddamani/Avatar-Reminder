@@ -1,0 +1,40 @@
+:root { font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #eef3fa; background: transparent; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; background: transparent; }
+button, input { font: inherit; }
+button { border: 1px solid #354254; background: #202b39; color: #eaf1fb; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+button:hover { background: #2c3b4d; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: #2979d5; border-color: #2979d5; color: white; }
+button.quiet { background: transparent; }
+.app-shell { height: 100vh; overflow: auto; padding: 16px; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: rgba(17, 24, 35, .94); backdrop-filter: blur(20px); box-shadow: 0 18px 60px rgba(0,0,0,.32); }
+.topbar, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.topbar { margin-bottom: 12px; }
+.eyebrow { color: #78b6ff; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
+h1 { font-size: 21px; margin: 3px 0 0; }
+h2 { font-size: 14px; margin: 0 0 12px; }
+.icon-button { width: 32px; height: 32px; padding: 0; }
+.avatar-panel { display: grid; grid-template-columns: 42% 58%; min-height: 180px; border-radius: 14px; overflow: hidden; background: radial-gradient(ellipse at 25% 60%, #334b65, #1b2635 75%); margin-bottom: 12px; }
+.avatar-canvas { min-width: 0; min-height: 180px; height: 200px; }
+.avatar-canvas canvas { display: block; width: 100%; height: 100%; }
+.speech-card { align-self: center; padding: 14px 12px 14px 0; font-size: 12px; }
+.speech-card strong { font-size: 13px; }
+.speech-card p { color: #b9c7d8; line-height: 1.5; }
+.response-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.response-row button { font-size: 10px; padding: 7px 8px; }
+.panel { border: 1px solid #303d4f; border-radius: 13px; padding: 13px; margin: 10px 0; background: rgba(29, 40, 55, .88); }
+.task-form { display: grid; gap: 9px; }
+label { display: grid; gap: 5px; color: #c6d3e2; font-size: 11px; }
+input { width: 100%; border: 1px solid #3b4a5f; border-radius: 8px; background: #111a26; color: #eef3fa; padding: 10px; min-width: 0; }
+.task-list { display: grid; gap: 8px; }
+.task-row, .event-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid #334052; padding-top: 9px; }
+.task-copy { display: grid; gap: 4px; min-width: 0; }
+.task-copy strong, .event-row strong { font-size: 12px; overflow-wrap: anywhere; }
+.task-copy small, .event-row small { color: #9cacc0; font-size: 10px; }
+.task-row button { font-size: 10px; white-space: nowrap; }
+.muted { color: #9cacc0; font-size: 11px; line-height: 1.5; }
+.status, .synced { color: #e0bd70; font-size: 10px; }
+.status.good, .synced { color: #7ed8a2; }
+.notice { background: #25384a; color: #cde5ff; border: 1px solid #3b5e7c; padding: 10px; border-radius: 10px; font-size: 11px; margin: 10px 0; overflow-wrap: anywhere; }
+footer { color: #74869c; font-size: 9px; text-align: center; padding: 10px 0 2px; }
+@media (max-width: 390px) { .app-shell { padding: 10px; } .avatar-panel { grid-template-columns: 38% 62%; } .speech-card { font-size: 11px; } }
