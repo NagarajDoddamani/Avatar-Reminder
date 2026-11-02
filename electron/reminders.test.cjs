@@ -6,7 +6,7 @@ function memoryDb() {
   const rows = new Map();
   const db = {
     prepare(sql) {
-      if (sql.includes('INSERT INTO tasks')) return { run: (id,title,message,due,scheduled,source,now1,now2) => { rows.set(id,{id,title,message,due_at:due,scheduled_reminder_at:scheduled,status:'pending',lifecycle_status:'scheduled',source,created_at:now1,updated_at:now2}); } };
+      if (sql.includes('INSERT INTO tasks')) return { run: (id,title,message,due,scheduled,recurrence,now1,now2) => { rows.set(id,{id,title,message,due_at:due,scheduled_reminder_at:scheduled,recurrence,status:'pending',lifecycle_status:'scheduled',source:'local',created_at:now1,updated_at:now2}); } };
       if (sql.includes('SELECT * FROM tasks WHERE id')) return { get: id => rows.get(id) };
       if (sql.includes('SELECT * FROM tasks') && sql.includes('lifecycle_status IN')) return { all: (now,limit) => [...rows.values()].filter(row=>['scheduled','snoozed','due'].includes(row.lifecycle_status)&&row.scheduled_reminder_at&&row.scheduled_reminder_at<=now&&(row.source!=='google_calendar'||row.event_status==null||row.event_status==='confirmed')).sort((a,b)=>a.scheduled_reminder_at.localeCompare(b.scheduled_reminder_at)).slice(0,limit) };
       if (sql.includes("UPDATE tasks SET lifecycle_status='due'")) return { run: id => { const row=rows.get(id);if(row)row.lifecycle_status='due'; } };

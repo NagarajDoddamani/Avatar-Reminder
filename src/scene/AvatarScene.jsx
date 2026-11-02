@@ -2,25 +2,31 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-const stateClip = state => {
-  if (state === 'walking_in' || state === 'walking_out') return 'walk';
+const stateClip = (state, walkingEnabled = true, reactionsEnabled = true) => {
+  if (state === 'walking_in' || state === 'walking_out') return walkingEnabled ? 'walk' : 'idle';
+  if (state.startsWith('reacting-') && !reactionsEnabled) return 'idle';
   if (state === 'reacting-done') return 'jump';
   if (state === 'reacting-snooze' || state === 'reacting-dismiss') return 'wave';
   return 'idle';
 };
 
-export default function AvatarScene({ state = 'hidden', arrivalReady = false, exitReady = false, onError, onAnimationComplete }) {
+export default function AvatarScene({ state = 'hidden', arrivalReady = false, exitReady = false, avatarSize = 'medium', animationSpeed = 1, walkingEnabled = true, reactionsEnabled = true, onError, onAnimationComplete }) {
   const hostRef = useRef(null);
   const stateRef = useRef(state);
   const errorRef = useRef(onError);
   const completeRef = useRef(onAnimationComplete);
   const arrivalRef = useRef(arrivalReady), exitRef = useRef(exitReady);
+  const sizeRef = useRef(avatarSize), speedRef = useRef(animationSpeed), walkingRef = useRef(walkingEnabled), reactionsRef = useRef(reactionsEnabled);
   const [failed, setFailed] = useState(false);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { errorRef.current = onError; }, [onError]);
   useEffect(() => { completeRef.current = onAnimationComplete; }, [onAnimationComplete]);
   useEffect(() => { arrivalRef.current = arrivalReady; }, [arrivalReady]);
   useEffect(() => { exitRef.current = exitReady; }, [exitReady]);
+  useEffect(() => { sizeRef.current = avatarSize; }, [avatarSize]);
+  useEffect(() => { speedRef.current = animationSpeed; }, [animationSpeed]);
+  useEffect(() => { walkingRef.current = walkingEnabled; }, [walkingEnabled]);
+  useEffect(() => { reactionsRef.current = reactionsEnabled; }, [reactionsEnabled]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -151,9 +157,9 @@ export default function AvatarScene({ state = 'hidden', arrivalReady = false, ex
         stateStarted = elapsed;
         completionSentFor = '';
       }
-      if (mixer) mixer.update(delta);
+      if (mixer) mixer.update(delta * Math.max(0.5, Math.min(2, Number(speedRef.current) || 1)));
 
-      const desired = stateClip(current);
+      const desired = stateClip(current, walkingRef.current, reactionsRef.current);
       const nextAction = actions.get(desired) || (desired !== 'idle' ? actions.get('idle') : null);
       if (nextAction !== currentAction) {
         if (currentAction) {
@@ -173,6 +179,8 @@ export default function AvatarScene({ state = 'hidden', arrivalReady = false, ex
       }
 
       if (avatarRoot) {
+        const sizeFactor = sizeRef.current === 'small' ? 0.76 : sizeRef.current === 'large' ? 1.2 : 1;
+        avatarRoot.scale.setScalar(sizeFactor);
         const phase = elapsed - stateStarted;
         const moveProgress = THREE.MathUtils.clamp(phase / 1, 0, 1);
         const walkDuration = currentAction?.getClip().duration || 1;
@@ -233,15 +241,15 @@ export default function AvatarScene({ state = 'hidden', arrivalReady = false, ex
           completionSentFor = 'idle';
           completeRef.current?.('idle');
         }
-        if (current === 'walking_in' && arrivalRef.current && !actions.has('walk') && phase >= 1 && completionSentFor !== current) {
+        if (current === 'walking_in' && arrivalRef.current && (!actions.has('walk') || !walkingRef.current) && phase >= 1 && completionSentFor !== current) {
           completionSentFor = current;
           completeRef.current?.(current);
         }
-        if (current === 'walking_out' && exitRef.current && !actions.has('walk') && phase >= 1 && completionSentFor !== current) {
+        if (current === 'walking_out' && exitRef.current && (!actions.has('walk') || !walkingRef.current) && phase >= 1 && completionSentFor !== current) {
           completionSentFor = current;
           completeRef.current?.(current);
         }
-        if (reaction && !actions.has(current === 'reacting-done' ? 'jump' : 'wave') && phase >= 0.7 && completionSentFor !== current) {
+        if (reaction && (!actions.has(current === 'reacting-done' ? 'jump' : 'wave') || !reactionsRef.current) && phase >= 0.7 && completionSentFor !== current) {
           completionSentFor = current;
           completeRef.current?.(current);
         }

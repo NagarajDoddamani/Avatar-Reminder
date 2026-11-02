@@ -198,6 +198,10 @@ function createCalendarService({ app, db, safeStorage, credentialsPath, googleCl
       } while (pageToken);
     } catch (error) {
       logApiError('calendarList.list', null, error);
+      const authError = error?.response?.data?.error;
+      const invalidGrant = authError === 'invalid_grant' || /invalid_grant|invalid credentials|token has been expired or revoked/i.test(String(error?.message || ''));
+      if (invalidGrant) disconnect();
+      if (invalidGrant) throw new Error('Google Calendar authorization expired or was revoked. Reconnect Google Calendar to continue.');
       throw new Error(`Could not load Google calendars: ${String(error?.response?.data?.error?.message || error?.message || 'Calendar API request failed').slice(0, 240)}`);
     }
     calendarTimeZones = new Map(calendars.map(item => [item.syncId, item.timeZone]));
@@ -329,13 +333,13 @@ function createCalendarService({ app, db, safeStorage, credentialsPath, googleCl
     return rows.length;
   }
 
-  async function createEvent(task) {
+  async function createEvent(task, calendarId = 'primary') {
     const auth = getAuthorizedClient();
     const api = googleClient.calendar({ version: 'v3', auth });
     const start = new Date(task.due_at);
     const end = new Date(start.getTime() + 30 * 60 * 1000);
     const response = await api.events.insert({
-      calendarId: 'primary',
+      calendarId: calendarId || 'primary',
       requestBody: {
         summary: task.title,
         description: task.message || 'Created from Avatar Reminder',
@@ -358,7 +362,15 @@ function createCalendarService({ app, db, safeStorage, credentialsPath, googleCl
     }
   }
 
-  return { connect, listCalendars, syncCalendars, getImportedEvents, updateAllDayReminderTime, createEvent, status };
+  function disconnect() {
+    db.prepare("DELETE FROM app_settings WHERE key='google_tokens'").run();
+    if (oauthClient) oauthClient.setCredentials({});
+    oauthClient = null;
+    credentials = null;
+    return true;
+  }
+
+  return { connect, disconnect, listCalendars, syncCalendars, getImportedEvents, updateAllDayReminderTime, createEvent, status };
 }
 
 module.exports = { createCalendarService };

@@ -128,11 +128,13 @@ function deleteBasicReminder(db, id, nowDate = new Date()) {
   return tx();
 }
 
-function ensureBasicNeedsOccurrences(db, nowDate = new Date()) {
+function ensureBasicNeedsOccurrences(db, nowDate = new Date(), missedHandling = 'skip') {
   const now = nowDate.toISOString();
   const staleBefore = new Date(nowDate.getTime() - 5 * 60 * 1000).toISOString();
   const tx = db.transaction(() => {
-    const stale = db.prepare(`SELECT id FROM tasks WHERE source='basic_needs' AND lifecycle_status='scheduled' AND scheduled_reminder_at < ?`).all(staleBefore);
+    const stale = missedHandling === 'skip'
+      ? db.prepare(`SELECT id FROM tasks WHERE source='basic_needs' AND lifecycle_status='scheduled' AND scheduled_reminder_at < ?`).all(staleBefore)
+      : [];
     for (const task of stale) {
       db.prepare(`UPDATE tasks SET lifecycle_status='dismissed',status='dismissed',updated_at=? WHERE id=? AND lifecycle_status='scheduled'`).run(now, task.id);
       db.prepare(`INSERT INTO reminder_history(task_id,event_type,response,occurred_at) VALUES(?,'skipped','missed',?)`).run(task.id, now);
@@ -178,13 +180,68 @@ function createLocalTask(db, input, nowDate = new Date()) {
   if (!input || typeof input.title !== 'string' || !input.title.trim()) throw new Error('A task title is required.');
   const dueAt = input.dueAt ? new Date(input.dueAt) : null;
   if (dueAt && Number.isNaN(dueAt.getTime())) throw new Error('The reminder date and time are invalid.');
+  const recurrence = ['none', 'daily', 'weekly'].includes(input.recurrence) ? input.recurrence : 'none';
+  if (recurrence !== 'none' && !dueAt) throw new Error('Recurring reminders need a date and time.');
   const now = nowDate.toISOString();
   const id = crypto.randomUUID();
   db.prepare(`INSERT INTO tasks
     (id,title,message,due_at,scheduled_reminder_at,recurrence,status,lifecycle_status,source,created_at,updated_at)
-    VALUES(?,?,?,?,?,'none','pending','scheduled',?,?,?)`)
-    .run(id, input.title.trim(), input.message || '', dueAt?.toISOString() || null, dueAt?.toISOString() || null, input.source || 'local', now, now);
+    VALUES(?,?,?,?,?,?,'pending','scheduled','local',?,?)`)
+    .run(id, input.title.trim(), input.message || '', dueAt?.toISOString() || null, dueAt?.toISOString() || null, recurrence, now, now);
   return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+}
+
+function updateLocalTask(db, id, input, nowDate = new Date()) {
+  if (!input || typeof input.title !== 'string' || !input.title.trim()) throw new Error('A task title is required.');
+  const task = db.prepare("SELECT * FROM tasks WHERE id=? AND source='local'").get(id);
+  if (!task) throw new Error('Local reminder not found.');
+  const dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  if (dueAt && Number.isNaN(dueAt.getTime())) throw new Error('The reminder date and time are invalid.');
+  const recurrence = ['none', 'daily', 'weekly'].includes(input.recurrence) ? input.recurrence : 'none';
+  if (recurrence !== 'none' && !dueAt) throw new Error('Recurring reminders need a date and time.');
+  const scheduled = dueAt?.toISOString() || null;
+  const now = nowDate.toISOString();
+  db.prepare(`UPDATE tasks SET title=?,message=?,due_at=?,scheduled_reminder_at=?,recurrence=?,status='pending',
+    lifecycle_status='scheduled',snooze_until=NULL,completed_at=NULL,expires_at=NULL,updated_at=? WHERE id=? AND source='local'`)
+    .run(input.title.trim(), String(input.message || ''), scheduled, scheduled, recurrence, now, id);
+  return db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+}
+
+function setLocalTaskEnabled(db, id, enabled, nowDate = new Date()) {
+  const task = db.prepare("SELECT * FROM tasks WHERE id=? AND source='local'").get(id);
+  if (!task) throw new Error('Local reminder not found.');
+  const now = nowDate.toISOString();
+  if (!enabled) {
+    db.prepare("UPDATE tasks SET lifecycle_status='paused',status='pending',updated_at=? WHERE id=? AND source='local'").run(now, id);
+  } else {
+    let scheduled = task.scheduled_reminder_at || task.due_at;
+    if (scheduled && new Date(scheduled) <= nowDate) {
+      const next = new Date(scheduled);
+      if (task.recurrence === 'daily' || task.recurrence === 'weekly') {
+        const days = task.recurrence === 'weekly' ? 7 : 1;
+        do { next.setDate(next.getDate() + days); } while (next <= nowDate);
+        scheduled = next.toISOString();
+      } else scheduled = now;
+    }
+    db.prepare("UPDATE tasks SET lifecycle_status='scheduled',status='pending',scheduled_reminder_at=?,due_at=?,snooze_until=NULL,updated_at=? WHERE id=? AND source='local'")
+      .run(scheduled, scheduled, now, id);
+  }
+  return db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+}
+
+function deleteLocalTask(db, id, nowDate = new Date()) {
+  const result = db.prepare("UPDATE tasks SET lifecycle_status='cancelled',status='dismissed',updated_at=? WHERE id=? AND source='local'")
+    .run(nowDate.toISOString(), id);
+  return result.changes > 0;
+}
+
+function nextLocalRecurrence(task, nowDate) {
+  const sourceTime = task.scheduled_reminder_at || task.due_at;
+  if (!sourceTime || !['daily', 'weekly'].includes(task.recurrence)) return null;
+  const next = new Date(sourceTime);
+  const days = task.recurrence === 'weekly' ? 7 : 1;
+  do { next.setDate(next.getDate() + days); } while (next <= nowDate);
+  return next.toISOString();
 }
 
 function claimDueTasks(db, now = new Date().toISOString(), limit = 30) {
@@ -216,7 +273,7 @@ function claimDueTasks(db, now = new Date().toISOString(), limit = 30) {
   return transaction();
 }
 
-function respondToTask(db, id, response, nowDate = new Date()) {
+function respondToTask(db, id, response, nowDate = new Date(), options = {}) {
   const allowed = new Set(['done', 'snooze', 'dismiss', 'no']);
   if (!allowed.has(response)) throw new Error('Unsupported response.');
   if (id === 'test') return { id, status: response === 'done' ? 'completed' : 'dismissed' };
@@ -228,11 +285,13 @@ function respondToTask(db, id, response, nowDate = new Date()) {
   let scheduled = task.scheduled_reminder_at;
   let snooze = null, completed = task.completed_at, expires = task.expires_at;
   if (response === 'done') {
-    lifecycle = 'completed'; legacy = 'completed'; completed = now;
-    expires = new Date(nowDate.getTime() + 60 * 60 * 1000).toISOString();
+    const next = task.source === 'local' ? nextLocalRecurrence(task, nowDate) : null;
+    if (next) { lifecycle = 'scheduled'; legacy = 'pending'; scheduled = next; completed = null; expires = null; }
+    else { lifecycle = 'completed'; legacy = 'completed'; completed = now; expires = new Date(nowDate.getTime() + 60 * 60 * 1000).toISOString(); }
   } else if (response === 'snooze') {
     lifecycle = 'snoozed'; legacy = 'pending';
-    let snoozeDate = new Date(nowDate.getTime() + 30 * 60 * 1000);
+    const snoozeMinutes = Math.min(240, Math.max(1, Number(options.snoozeMinutes) || 30));
+    let snoozeDate = new Date(nowDate.getTime() + snoozeMinutes * 60 * 1000);
     if (task.basic_reminder_id) {
       const reminder = db.prepare('SELECT * FROM basic_reminders WHERE id=?').get(task.basic_reminder_id);
       if (reminder && !isInsideBasicSchedule(reminder, snoozeDate)) {
@@ -242,7 +301,9 @@ function respondToTask(db, id, response, nowDate = new Date()) {
     }
     snooze = snoozeDate.toISOString(); scheduled = snooze;
   } else {
-    lifecycle = 'dismissed'; legacy = 'dismissed';
+    const next = task.source === 'local' ? nextLocalRecurrence(task, nowDate) : null;
+    if (next) { lifecycle = 'scheduled'; legacy = 'pending'; scheduled = next; }
+    else { lifecycle = 'dismissed'; legacy = 'dismissed'; }
   }
   const tx = db.transaction(() => {
     db.prepare(`UPDATE tasks SET lifecycle_status=?,status=?,scheduled_reminder_at=?,due_at=?,snooze_until=?,completed_at=?,expires_at=?,updated_at=? WHERE id=?`)
@@ -259,7 +320,8 @@ function archiveExpiredCompleted(db, now = new Date().toISOString()) {
 }
 
 module.exports = {
-  createLocalTask, claimDueTasks, respondToTask, archiveExpiredCompleted,
+  createLocalTask, updateLocalTask, setLocalTaskEnabled, deleteLocalTask,
+  claimDueTasks, respondToTask, archiveExpiredCompleted,
   seedBasicNeedsReminders, nextBasicOccurrence, saveBasicReminder, setBasicReminderEnabled,
   deleteBasicReminder, ensureBasicNeedsOccurrences, listBasicNeedsReminders
 };
