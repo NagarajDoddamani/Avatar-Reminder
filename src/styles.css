@@ -45,10 +45,17 @@ footer { color: #74869c; font-size: 9px; text-align: center; padding: 10px 0 2px
 .check-setting input { width: 16px; height: 16px; }
 input[type="range"] { padding: 5px 0; }
 .notice.error { border-color: #8b4d54; color: #ffd5d8; background: #42272d; }
-.overlay-shell { width: 390px; height: 330px; padding: 0 12px 12px; display: grid; grid-template-columns: 130px 1fr; align-items: end; gap: 8px; background: transparent; color: #eef3fa; }
-.overlay-character { height: 280px; overflow: hidden; }
-.overlay-character .avatar-canvas { width: 130px; height: 270px; min-height: 0; }
-.overlay-card { align-self: end; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 15px; background: rgba(17,24,35,.96); box-shadow: 0 12px 38px rgba(0,0,0,.42); font-size: 12px; }
+.overlay-shell { width: 500px; height: 370px; padding: 0 14px 14px; display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: end; gap: 10px; background: transparent; color: #eef3fa; }
+.overlay-character { height: 330px; overflow: hidden; display: grid; align-items: end; }
+.overlay-character .avatar-canvas { width: 160px; height: 320px; min-height: 0; }
+.avatar-scene-host { position: relative; overflow: hidden; }
+.avatar-model-error { position: absolute; inset: 25% 8px auto; padding: 9px; border: 1px solid rgba(255,255,255,.18); border-radius: 9px; background: rgba(17,24,35,.86); color: #d0deee; text-align: center; font-size: 10px; line-height: 1.45; }
+.overlay-card { align-self: end; min-width: 0; padding: 15px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 15px; background: rgba(17,24,35,.97); box-shadow: 0 12px 38px rgba(0,0,0,.42); font-size: 12px; pointer-events: auto; }
+.overlay-card.board-entering { animation: reminder-board-enter 360ms cubic-bezier(.2,.75,.25,1) both; }
+@keyframes reminder-board-enter { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+.overlay-kicker { color: #78b6ff; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.overlay-card h2 { margin: 5px 0; font-size: 15px; overflow-wrap: anywhere; }
+.overlay-card .overlay-time { display: block; color: #8fbff0; font-size: 10px; }
 .overlay-card p { color: #d0deee; line-height: 1.45; margin: 8px 0; }
 .overlay-card small { color: #8fbff0; }
 .overlay-card .response-row button { font-size: 10px; }

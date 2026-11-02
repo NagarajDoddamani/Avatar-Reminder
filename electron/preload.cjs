@@ -14,12 +14,18 @@ contextBridge.exposeInMainWorld('avatarApp', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   testReminder: () => ipcRenderer.invoke('app:test-reminder'),
   dismissOverlay: () => ipcRenderer.invoke('overlay:dismiss'),
+  walkOutOverlay: () => ipcRenderer.invoke('overlay:walk-out'),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
   showWindow: () => ipcRenderer.invoke('window:show'),
   onReminder: (callback) => {
     const listener = (_event, task) => callback(task);
     ipcRenderer.on('reminder:fire', listener);
     return () => ipcRenderer.removeListener('reminder:fire', listener);
+  },
+  onReminderArrived: (callback) => {
+    const listener = (_event, taskId) => callback(taskId);
+    ipcRenderer.on('reminder:arrived', listener);
+    return () => ipcRenderer.removeListener('reminder:arrived', listener);
   },
   onTasksChanged: (callback) => {
     const listener = () => callback();

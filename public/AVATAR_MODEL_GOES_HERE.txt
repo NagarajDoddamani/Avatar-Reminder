@@ -1,1 +1,1 @@
-Place a licensed VRM character model here as avatar.vrm. See README.md.
+Place the rigged, animated GLB character at public/models/avatar.glb. See README.md for clip mapping and fallback behavior.

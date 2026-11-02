@@ -1,115 +1,262 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
-export default function AvatarScene({ state }) {
+const stateClip = state => {
+  if (state === 'walking_in' || state === 'walking_out') return 'walk';
+  if (state === 'reacting-done') return 'jump';
+  if (state === 'reacting-snooze' || state === 'reacting-dismiss') return 'wave';
+  return 'idle';
+};
+
+export default function AvatarScene({ state = 'hidden', arrivalReady = false, exitReady = false, onError, onAnimationComplete }) {
   const hostRef = useRef(null);
   const stateRef = useRef(state);
+  const errorRef = useRef(onError);
+  const completeRef = useRef(onAnimationComplete);
+  const arrivalRef = useRef(arrivalReady), exitRef = useRef(exitReady);
+  const [failed, setFailed] = useState(false);
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { errorRef.current = onError; }, [onError]);
+  useEffect(() => { completeRef.current = onAnimationComplete; }, [onAnimationComplete]);
+  useEffect(() => { arrivalRef.current = arrivalReady; }, [arrivalReady]);
+  useEffect(() => { exitRef.current = exitReady; }, [exitReady]);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(32, host.clientWidth / host.clientHeight, 0.1, 100);
-    camera.position.set(0, 1.3, 4.8);
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(host.clientWidth, host.clientHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    host.appendChild(renderer.domElement);
-
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x5c6780, 2.2));
-    const key = new THREE.DirectionalLight(0xffffff, 2.5);
-    key.position.set(2, 4, 3);
-    scene.add(key);
-
-    let avatar = null;
+    if (!host) return undefined;
+    let renderer;
+    let disposed = false;
+    let frame = 0;
+    let avatarRoot = null;
     let mixer = null;
-    let actions = {};
     let currentAction = null;
+    let transitionAction = null;
+    let completionSentFor = '';
+    const actions = new Map();
+    const actionKeys = new WeakMap();
+    const bones = [];
+    let walkBones = [];
+    let armBones = [];
+    let headBones = [];
+    let torsoBones = [];
+    let proceduralFadeUntil = 0;
     const clock = new THREE.Clock();
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(34, Math.max(1, host.clientWidth) / Math.max(1, host.clientHeight), 0.05, 40);
+    camera.position.set(0, 1.2, 4.5);
+    camera.lookAt(0, 1.05, 0);
 
-    // Add public/domain-licensed avatar model at public/avatar.vrm.
-    // This starter uses a procedural placeholder until a VRM is supplied.
-    const placeholder = new THREE.Group();
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe3b18b, roughness: 0.85 });
-    const jacket = new THREE.MeshStandardMaterial({ color: 0x557f9b, roughness: 0.8 });
-    const pants = new THREE.MeshStandardMaterial({ color: 0x273342, roughness: 0.8 });
-    const shoes = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.6 });
-    const sphere = (x, y, z, sx, sy, sz, material) => {
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), material);
-      mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); placeholder.add(mesh);
-      return mesh;
+    try {
+      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: 'low-power', preserveDrawingBuffer: false });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer.setSize(Math.max(1, host.clientWidth), Math.max(1, host.clientHeight));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      host.appendChild(renderer.domElement);
+    } catch (error) {
+      setFailed(true);
+      errorRef.current?.(`WebGL could not start: ${error.message}`);
+      return undefined;
+    }
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x566176, 2.0));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    keyLight.position.set(2.5, 4, 3.5);
+    scene.add(keyLight);
+
+    const lost = event => {
+      event.preventDefault();
+      if (!disposed) {
+        setFailed(true);
+        errorRef.current?.('The avatar graphics context was lost. Restart the app to restore the 3D character.');
+      }
     };
-    sphere(0, 1.62, 0, 0.27, 0.31, 0.24, skin);
-    sphere(0, 1.95, 0, 0.22, 0.23, 0.22, jacket);
-    sphere(0, 1.22, 0, 0.3, 0.38, 0.18, pants);
-    sphere(-0.18, 0.72, 0, 0.11, 0.38, 0.12, pants);
-    sphere(0.18, 0.72, 0, 0.11, 0.38, 0.12, pants);
-    sphere(-0.18, 0.28, 0.05, 0.15, 0.09, 0.23, shoes);
-    sphere(0.18, 0.28, 0.05, 0.15, 0.09, 0.23, shoes);
-    sphere(-0.31, 1.9, 0, 0.09, 0.33, 0.1, jacket);
-    sphere(0.31, 1.9, 0, 0.09, 0.33, 0.1, jacket);
-    scene.add(placeholder);
-    avatar = placeholder;
-    avatar.position.x = 0.0;
+    renderer.domElement.addEventListener('webglcontextlost', lost, false);
 
     const loader = new GLTFLoader();
-    loader.register(parser => new VRMLoaderPlugin(parser));
-    loader.load('/avatar.vrm', (gltf) => {
-      if (avatar) scene.remove(avatar);
-      const vrm = gltf.userData.vrm;
-      VRMUtils.rotateVRM0(vrm);
-      avatar = vrm.scene;
-      avatar.scale.setScalar(1.0);
-      scene.add(avatar);
-      mixer = new THREE.AnimationMixer(avatar);
-      actions = {};
+    const modelUrl = new URL('./models/avatar.glb', window.location.href).href;
+    loader.load(modelUrl, gltf => {
+      if (disposed) return;
+      const model = gltf.scene;
+      model.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(model);
+      const size = bounds.getSize(new THREE.Vector3());
+      if (!Number.isFinite(size.y) || size.y <= 0) {
+        setFailed(true);
+        errorRef.current?.('The GLB has no visible 3D character mesh.');
+        return;
+      }
+      const modelGroup = new THREE.Group();
+      const scale = 2.15 / size.y;
+      model.scale.setScalar(scale);
+      model.position.set(-((bounds.min.x + bounds.max.x) / 2) * scale, -bounds.min.y * scale, -((bounds.min.z + bounds.max.z) / 2) * scale);
+      modelGroup.add(model);
+      scene.add(modelGroup);
+      avatarRoot = modelGroup;
+      model.traverse(object => {
+        if (object.isBone) bones.push({ bone: object, rotation: object.rotation.clone(), name: object.name.toLowerCase() });
+        if (object.isMesh) {
+          object.frustumCulled = true;
+          if (object.material) for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.needsUpdate = true;
+        }
+      });
+      walkBones = bones.filter(item => /thigh|upleg|upperleg|calf|shin|lowerleg|foot|ankle/.test(item.name));
+      armBones = bones.filter(item => /upperarm|arm|shoulder|forearm|elbow|hand/.test(item.name));
+      headBones = bones.filter(item => /head|neck/.test(item.name));
+      torsoBones = bones.filter(item => /spine|chest/.test(item.name));
+
+      mixer = new THREE.AnimationMixer(model);
       for (const clip of gltf.animations || []) {
         const name = clip.name.toLowerCase();
-        const key = name.includes('walk') ? 'walk' :
-          name.includes('talk') ? 'talk' :
-          name.includes('idle') ? 'idle' : name;
-        actions[key] = mixer.clipAction(clip);
+        const key = name.includes('walk') ? 'walk' : name.includes('wave') ? 'wave' : name.includes('jump') ? 'jump' : name.includes('idle') ? 'idle' : null;
+        if (key && !actions.has(key)) {
+          const action = mixer.clipAction(clip);
+          actions.set(key, action);
+          actionKeys.set(action, key);
+        }
       }
-    }, undefined, () => {
-      // Missing avatar.vrm is expected on a fresh install; placeholder remains visible.
+      mixer.addEventListener('finished', event => {
+        const current = stateRef.current;
+        const key = actionKeys.get(event.action);
+        if (current.startsWith('reacting-') && key === stateClip(current) && completionSentFor !== current) {
+          completionSentFor = current;
+          completeRef.current?.(current);
+        }
+      });
+      mixer.addEventListener('loop', event => {
+        const current = stateRef.current;
+        if (actionKeys.get(event.action) !== 'walk' || completionSentFor === current) return;
+        if ((current === 'walking_in' && arrivalRef.current) || (current === 'walking_out' && exitRef.current)) {
+          completionSentFor = current;
+          completeRef.current?.(current);
+        }
+      });
+      setFailed(false);
+    }, undefined, error => {
+      if (disposed) return;
+      setFailed(true);
+      errorRef.current?.(`Could not load public/models/avatar.glb: ${error?.message || 'file unavailable'}`);
     });
 
-    let frame = 0;
+    let previousState = '';
+    let stateStarted = 0;
     const animate = () => {
+      if (disposed) return;
       frame = requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-      if (mixer) mixer.update(delta);
+      const delta = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.elapsedTime;
       const current = stateRef.current;
-      if (avatar) {
-        if (current === 'walkingIn') {
-          avatar.position.x = THREE.MathUtils.damp(avatar.position.x, 0, 2.5, delta);
-          avatar.rotation.y = Math.sin(clock.elapsedTime * 3) * 0.04;
-        } else if (current === 'walkingOut') {
-          avatar.position.x = THREE.MathUtils.damp(avatar.position.x, 2.8, 2.5, delta);
-        } else {
-          avatar.position.x = THREE.MathUtils.damp(avatar.position.x, 0, 3, delta);
-          avatar.position.y = 0.035 * Math.sin(clock.elapsedTime * 2);
-          avatar.rotation.y = 0.06 * Math.sin(clock.elapsedTime);
+      if (current !== previousState) {
+        previousState = current;
+        stateStarted = elapsed;
+        completionSentFor = '';
+      }
+      if (mixer) mixer.update(delta);
+
+      const desired = stateClip(current);
+      const nextAction = actions.get(desired) || (desired !== 'idle' ? actions.get('idle') : null);
+      if (nextAction !== currentAction) {
+        if (currentAction) {
+          currentAction.fadeOut(0.2);
+          transitionAction = currentAction;
+          if (!nextAction) proceduralFadeUntil = elapsed + 0.2;
         }
-        const desired = current === 'walkingIn' || current === 'walkingOut' ? 'walk' :
-          current === 'talking' ? 'talk' : 'idle';
-        if (actions[desired] && currentAction !== actions[desired]) {
-          currentAction?.fadeOut(0.2);
-          currentAction = actions[desired];
-          currentAction.reset().fadeIn(0.2).play();
+        currentAction = nextAction || null;
+        if (currentAction) {
+          currentAction.reset();
+          if (desired === 'jump' || desired === 'wave') {
+            currentAction.setLoop(THREE.LoopOnce, 1);
+            currentAction.clampWhenFinished = true;
+          } else currentAction.setLoop(THREE.LoopRepeat, Infinity);
+          currentAction.fadeIn(0.18).play();
         }
       }
-      renderer.render(scene, camera);
+
+      if (avatarRoot) {
+        const phase = elapsed - stateStarted;
+        const moveProgress = THREE.MathUtils.clamp(phase / 1, 0, 1);
+        const walkDuration = currentAction?.getClip().duration || 1;
+        const walkCycleProgress = currentAction ? (currentAction.time % walkDuration) / walkDuration : moveProgress;
+        // The outer Electron window carries the in-place walk cycle across the
+        // desktop. Keep the rig fixed inside its view so the feet do not double-slide.
+        avatarRoot.position.x = 0;
+
+        const isWalking = current === 'walking_in' || current === 'walking_out';
+        const isTalking = current === 'talking';
+        const hasDesiredClip = actions.has(desired);
+        const usingProceduralPose = !hasDesiredClip;
+        avatarRoot.position.y = !actions.has('idle') && !isWalking ? 0.018 * Math.sin(elapsed * 2.6) : 0;
+        if (current === 'walking_in') {
+          const turn = arrivalRef.current ? THREE.MathUtils.clamp((walkCycleProgress - 0.68) / 0.32, 0, 1) : 0;
+          const turnEase = turn * turn * (3 - 2 * turn);
+          // The model's forward axis is +Z. Entering travels from right to left,
+          // so it must turn toward -X while walking, then face the user on arrival.
+          avatarRoot.rotation.y = (-Math.PI / 2) * (1 - turnEase);
+        } else if (current === 'walking_out') {
+          const turn = THREE.MathUtils.clamp(moveProgress / 0.28, 0, 1);
+          avatarRoot.rotation.y = (Math.PI / 2) * turn * turn * (3 - 2 * turn);
+        } else avatarRoot.rotation.y = isTalking ? 0.018 * Math.sin(elapsed * 7) : 0;
+
+        // Preserve AnimationMixer's pose. Restore the bind pose only after a clip has
+        // completed its fade-out, so standing never snaps back from a walk frame.
+        if (usingProceduralPose && !currentAction && elapsed >= proceduralFadeUntil) {
+          for (const item of bones) item.bone.rotation.copy(item.rotation);
+        }
+        if (isWalking && !actions.has('walk')) {
+          const gait = Math.sin(elapsed * 10);
+          walkBones.forEach(item => {
+            const side = item.name.endsWith('.l') ? 1 : -1;
+            if (/upperleg|thigh/.test(item.name)) item.bone.rotation.x += gait * side * 0.38;
+            else if (/lowerleg|calf|shin/.test(item.name)) item.bone.rotation.x += Math.max(0, -gait * side) * 0.62;
+            else item.bone.rotation.x -= gait * side * 0.16;
+          });
+          armBones.forEach(item => { item.bone.rotation.x += gait * (item.name.endsWith('.l') ? -0.25 : 0.25); });
+        }
+        if (!actions.has('idle') && !isWalking) {
+          torsoBones.forEach((item, index) => { item.bone.rotation.x += (index ? 0.008 : 0.014) * Math.sin(elapsed * 2.4); });
+        }
+        if (isTalking && headBones.length) headBones[0].bone.rotation.x += 0.045 * Math.sin(elapsed * 8);
+        const reaction = current.startsWith('reacting-');
+        if (reaction && !actions.has(current === 'reacting-done' ? 'jump' : 'wave') && armBones.length) {
+          const pulse = Math.sin(Math.min(1, (elapsed - stateStarted) / 0.7) * Math.PI);
+          const leftArm = armBones.filter(item => item.name.endsWith('.l'));
+          const reactionArms = current === 'reacting-done' ? armBones : (leftArm.length ? leftArm : armBones.slice(0, 2));
+          reactionArms.forEach((item, index) => {
+            item.bone.rotation.z += (current === 'reacting-done' ? -0.75 : -0.8) * pulse;
+            if (current !== 'reacting-done' && /lowerarm|forearm|hand/.test(item.name)) item.bone.rotation.x += 0.18 * Math.sin(elapsed * 13) * pulse;
+          });
+          if (headBones.length && current === 'reacting-dismiss') headBones[0].bone.rotation.y += 0.18 * pulse;
+          if (current === 'reacting-done') avatarRoot.position.y += pulse * 0.18;
+        }
+        if (current === 'idle' && transitionAction && (!transitionAction.isRunning() || transitionAction.getEffectiveWeight() <= 0.01) && completionSentFor !== 'idle') {
+          transitionAction = null;
+          completionSentFor = 'idle';
+          completeRef.current?.('idle');
+        }
+        if (current === 'walking_in' && arrivalRef.current && !actions.has('walk') && phase >= 1 && completionSentFor !== current) {
+          completionSentFor = current;
+          completeRef.current?.(current);
+        }
+        if (current === 'walking_out' && exitRef.current && !actions.has('walk') && phase >= 1 && completionSentFor !== current) {
+          completionSentFor = current;
+          completeRef.current?.(current);
+        }
+        if (reaction && !actions.has(current === 'reacting-done' ? 'jump' : 'wave') && phase >= 0.7 && completionSentFor !== current) {
+          completionSentFor = current;
+          completeRef.current?.(current);
+        }
+      }
+      try { renderer.render(scene, camera); }
+      catch (error) {
+        setFailed(true);
+        errorRef.current?.(`The avatar could not be rendered: ${error.message}`);
+        cancelAnimationFrame(frame);
+      }
     };
     animate();
 
     const resize = () => {
-      if (!host.clientWidth || !host.clientHeight) return;
+      if (disposed || !host.clientWidth || !host.clientHeight) return;
       camera.aspect = host.clientWidth / host.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(host.clientWidth, host.clientHeight);
@@ -118,18 +265,26 @@ export default function AvatarScene({ state }) {
     observer.observe(host);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(frame);
       observer.disconnect();
-      renderer.dispose();
-      host.removeChild(renderer.domElement);
-      scene.traverse(obj => {
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) {
-          for (const material of Array.isArray(obj.material) ? obj.material : [obj.material]) material.dispose();
+      renderer.domElement.removeEventListener('webglcontextlost', lost);
+      mixer?.stopAllAction();
+      if (avatarRoot && mixer) mixer.uncacheRoot(avatarRoot.children[0]);
+      scene.traverse(object => {
+        object.geometry?.dispose();
+        const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+        for (const material of materials) {
+          for (const value of Object.values(material)) if (value?.isTexture) value.dispose();
+          material.dispose();
         }
       });
+      renderer.dispose();
+      renderer.domElement.remove();
     };
   }, []);
 
-  return <div className="avatar-canvas" ref={hostRef} aria-label="3D avatar preview" />;
+  return <div className="avatar-canvas avatar-scene-host" ref={hostRef} aria-label="Animated 3D avatar">
+    {failed && <div className="avatar-model-error" role="status">3D avatar unavailable. Check <code>public/models/avatar.glb</code>.</div>}
+  </div>;
 }

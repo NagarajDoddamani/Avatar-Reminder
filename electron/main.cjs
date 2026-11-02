@@ -19,6 +19,7 @@ let reminderQueue = [];
 let currentReminderId = null;
 let overlayLoaded = false;
 let calendarSyncInProgress = false;
+let avatarWalkTimer;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -56,9 +57,9 @@ function createWindow() {
 
 function createAvatarWindow() {
   avatarWindow = new BrowserWindow({
-    width: 390, height: 330, frame: false, transparent: true,
+    width: 500, height: 370, frame: false, transparent: true,
     alwaysOnTop: true, show: false, resizable: false, skipTaskbar: true,
-    focusable: false, hasShadow: false, backgroundColor: '#00000000',
+    focusable: true, hasShadow: false, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   const url = !app.isPackaged ? 'http://127.0.0.1:5173/#avatar' : `${pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href}#avatar`;
@@ -90,19 +91,48 @@ function pruneCancelledReminders() {
 function walkAvatar(task) {
   if (!avatarWindow || avatarWindow.isDestroyed()) createAvatarWindow();
   const area = screen.getPrimaryDisplay().workArea;
-  const y = area.y + Math.max(30, area.height - 360);
+  const y = area.y + Math.max(20, area.height - 390);
   const from = area.x + area.width;
-  const to = area.x + area.width - 410;
+  const to = area.x + Math.round((area.width - 500) / 2);
   avatarWindow.setPosition(from, y); avatarWindow.showInactive(); avatarWindow.setAlwaysOnTop(true, 'screen-saver');
   avatarWindow.webContents.send('reminder:fire', task);
   let x = from;
-  const timer = setInterval(() => {
-    x = Math.max(to, x - 22); avatarWindow.setPosition(x, y);
-    if (x <= to) clearInterval(timer);
+  clearInterval(avatarWalkTimer);
+  avatarWalkTimer = setInterval(() => {
+    if (!avatarWindow || avatarWindow.isDestroyed()) { clearInterval(avatarWalkTimer); avatarWalkTimer = null; return; }
+    if (currentReminderId !== task.id) { clearInterval(avatarWalkTimer); avatarWalkTimer = null; return; }
+    x = Math.max(to, x - 8); avatarWindow.setPosition(x, y);
+    if (x <= to) {
+      clearInterval(avatarWalkTimer);
+      avatarWalkTimer = null;
+      avatarWindow.webContents.send('reminder:arrived', task.id);
+    }
   }, 16);
 }
 
+function walkOverlayOffScreen() {
+  if (!avatarWindow || avatarWindow.isDestroyed() || !avatarWindow.isVisible()) return Promise.resolve(false);
+  const area = screen.getPrimaryDisplay().workArea;
+  const [startX, y] = avatarWindow.getPosition();
+  const targetX = area.x + area.width;
+  let x = startX;
+  clearInterval(avatarWalkTimer);
+  return new Promise(resolve => {
+    avatarWalkTimer = setInterval(() => {
+      if (!avatarWindow || avatarWindow.isDestroyed()) {
+        clearInterval(avatarWalkTimer); avatarWalkTimer = null; resolve(false); return;
+      }
+      x = Math.min(targetX, x + 8);
+      avatarWindow.setPosition(x, y);
+      if (x >= targetX) {
+        clearInterval(avatarWalkTimer); avatarWalkTimer = null; resolve(true);
+      }
+    }, 16);
+  });
+}
+
 function showReminder(task) {
+  if (task.id === currentReminderId || reminderQueue.some(item => item.id === task.id)) return;
   reminderQueue.push(task);
   if (overlayLoaded && avatarWindow && !avatarWindow.isVisible()) displayNextReminder();
   if (Notification.isSupported()) {
@@ -165,14 +195,10 @@ function registerIpc() {
     scheduled_reminder_at ASC, created_at DESC`).all());
   ipcMain.handle('tasks:create', (_event, input) => createLocalTask(db, input));
   ipcMain.handle('tasks:respond', (_event, { id, response }) => {
-    const updated = respondToTask(db, id, response);
+    const updated = id === 'test' ? { id, lifecycle_status: response } : respondToTask(db, id, response);
     const wasCurrent = currentReminderId === id;
     reminderQueue = reminderQueue.filter(task => task.id !== id);
-    if (wasCurrent) {
-      currentReminderId = null;
-      if (avatarWindow && !avatarWindow.isDestroyed()) avatarWindow.hide();
-      setTimeout(displayNextReminder, 100);
-    } else if (!currentReminderId) setTimeout(displayNextReminder, 100);
+    if (!wasCurrent && !currentReminderId) setTimeout(displayNextReminder, 100);
     return updated;
   });
 
@@ -208,7 +234,13 @@ function registerIpc() {
 
   ipcMain.handle('window:hide', () => mainWindow.hide());
   ipcMain.handle('window:show', () => mainWindow.show());
-  ipcMain.handle('overlay:dismiss', () => { if (avatarWindow && !avatarWindow.isDestroyed()) avatarWindow.hide(); currentReminderId = null; setTimeout(displayNextReminder, 100); });
+  ipcMain.handle('overlay:dismiss', () => {
+    clearInterval(avatarWalkTimer); avatarWalkTimer = null;
+    if (avatarWindow && !avatarWindow.isDestroyed()) avatarWindow.hide();
+    currentReminderId = null;
+    setTimeout(displayNextReminder, 100);
+  });
+  ipcMain.handle('overlay:walk-out', () => walkOverlayOffScreen());
   ipcMain.handle('app:test-reminder', () => showReminder({ id: 'test', title: 'Test reminder', message: 'Your desktop avatar is working.' }));
   ipcMain.handle('settings:get', () => {
     const rows = db.prepare("SELECT key, value FROM app_settings WHERE key NOT LIKE 'google_%'").all();
@@ -266,5 +298,5 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
   else mainWindow.show();
 });
-app.on('before-quit', () => { app.isQuitting = true; clearInterval(reminderTimer); clearInterval(calendarSyncTimer); clearInterval(onlineMonitorTimer); });
+app.on('before-quit', () => { app.isQuitting = true; clearInterval(reminderTimer); clearInterval(calendarSyncTimer); clearInterval(onlineMonitorTimer); clearInterval(avatarWalkTimer); });
 app.on('window-all-closed', (event) => { /* Keep tray app running on Windows. */ });

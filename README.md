@@ -5,7 +5,7 @@ This is a runnable starter scaffold for a local-first Electron reminder app. It 
 - React UI with task creation and response buttons
 - SQLite schema and reminder polling loop
 - Browser speech synthesis for spoken reminders
-- Three.js procedural avatar placeholder and optional VRM loading
+- Animated GLB avatar with a transparent, always-on-top reminder overlay
 - Google Calendar OAuth callback, upcoming-event import, and event creation
 
 ## Prerequisites
@@ -22,13 +22,7 @@ npm install
 npm run dev
 ```
 
-The first launch uses a procedural placeholder avatar. To use a rigged 3D boy:
-1. Obtain a VRM model you have permission to use.
-2. Put it at `public/avatar.vrm`.
-3. Ensure the model includes animation clips named with `Idle`, `Walk`, and optionally `Talk` for automatic mapping.
-4. Restart the app.
-
-A model without animation clips will load as a static model. For best results, use a VRM model plus compatible animation clips or add a retargeting pipeline.
+Put a rigged GLB character at `public/models/avatar.glb`. The app loads it with Three.js and plays matching `walk`, `wave`, and `jump` clips when available. Missing idle or talk clips use subtle procedural rig motion; missing walk or gesture clips use a rig-aware fallback. If the GLB cannot load or WebGL is unavailable, the reminder board remains usable and reports that the 3D avatar could not be loaded.
 
 ## Google Calendar setup
 
@@ -55,7 +49,7 @@ Local reminders stay available when Google Calendar is disconnected. Completed r
 
 - OAuth tokens are encrypted with Electron `safeStorage` where available. On systems where encryption is unavailable, this starter stores the token data as base64 text; production builds should instead fail closed or implement a stronger secure token store.
 - Speech and microphone recognition use browser-provided system features; recognition availability and transcription quality depend on the installed runtime and language services.
-- The avatar's procedural placeholder is only for layout testing, not a final character asset.
+- The desktop overlay needs a running app process; choosing **Quit** stops reminders and avatar animations.
 
 ## Suggested next development steps
 

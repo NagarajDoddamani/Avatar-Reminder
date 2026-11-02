@@ -4,13 +4,17 @@ import AvatarScene from './scene/AvatarScene.jsx';
 import './styles.css';
 
 const isOverlay = window.location.hash === '#avatar';
-function speak(text, settings) {
-  if (!settings?.speakReminders || !('speechSynthesis' in window)) return;
+function speak(text, settings, onStart, onEnd) {
+  if (!settings?.speakReminders || !('speechSynthesis' in window)) return null;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = Number(settings.speechRate) || 0.96;
   utterance.volume = Number(settings.speechVolume ?? 0.85);
+  utterance.onstart = onStart;
+  utterance.onend = onEnd;
+  utterance.onerror = onEnd;
   window.speechSynthesis.speak(utterance);
+  return utterance;
 }
 function localParts(value) {
   if (!value) return { date: '', time: '' };
@@ -23,26 +27,54 @@ function eventTimeLabel(event) {
   if (event.all_day && event.start_at) return `All day · ${new Date(`${event.start_at}T00:00:00`).toLocaleDateString()}`;
   return event.start_at ? new Date(event.start_at).toLocaleString() : 'No start time';
 }
+function reminderTime(task) {
+  const scheduled = task?.scheduled_reminder_at || task?.due_at;
+  return scheduled ? new Date(scheduled).toLocaleString() : 'Now';
+}
+function reminderSpeech(task) {
+  return `${task.title}. Scheduled for ${reminderTime(task)}. ${task.message || 'Your reminder is due.'}`;
+}
 function App() {
   const [tasks, setTasks] = useState([]), [active, setActive] = useState(null);
+  const activeRef = useRef(active);
   const [title, setTitle] = useState(''), [date, setDate] = useState(''), [time, setTime] = useState(''), [message, setMessage] = useState('');
   const [settings, setSettings] = useState({ speakReminders: false, syncCalendar: true, quietStart: '', quietEnd: '', speechVolume: 0.85, speechRate: 0.96, avatarEnabled: true });
-  const settingsRef = useRef(settings);
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  const [settingsLoaded, setSettingsLoaded] = useState(false), [presentationPhase, setPresentationPhase] = useState('hidden'), [isResponding, setIsResponding] = useState(false);
+  const [arrivalReady, setArrivalReady] = useState(false), [exitReady, setExitReady] = useState(false);
+  const presentationRef = useRef({ id: null, arrived: false, walkFinished: false, exitWindowFinished: false, exitWalkFinished: false });
+  const spokenReminderIds = useRef(new Set());
   const [calendarStatus, setCalendarStatus] = useState({ connected: false, credentialsConfigured: false }), [events, setEvents] = useState([]), [error, setError] = useState(''), [notice, setNotice] = useState(''), [listening, setListening] = useState(false), [taskFilter, setTaskFilter] = useState('upcoming');
   const [calendars, setCalendars] = useState([]), [selectedCalendarIds, setSelectedCalendarIds] = useState([]), [syncRange, setSyncRange] = useState(() => { const start = new Date(); start.setDate(start.getDate() - 30); const end = new Date(); end.setDate(end.getDate() + 365); return { from: dateInputValue(start), to: dateInputValue(end) }; }), [syncing, setSyncing] = useState(false);
-  const refresh = async () => { try { setTasks(await window.avatarApp.listTasks()); setCalendarStatus(await window.avatarApp.calendarStatus()); setSettings(await window.avatarApp.getSettings()); } catch (e) { setError(e.message); } };
+  const refresh = async () => { try { setTasks(await window.avatarApp.listTasks()); setCalendarStatus(await window.avatarApp.calendarStatus()); setSettings(await window.avatarApp.getSettings()); setSettingsLoaded(true); } catch (e) { setError(e.message); } };
   useEffect(() => {
     refresh();
-    const unsub = window.avatarApp.onReminder(task => { setActive(task); if (isOverlay) speak(task.message || `It's time for ${task.title}.`, settingsRef.current); });
-    return unsub;
+    const unsubReminder = window.avatarApp.onReminder(task => {
+      const id = String(task.id);
+      if (String(activeRef.current?.id) === id || presentationRef.current.id === id) return;
+      activeRef.current = task;
+      presentationRef.current = { id, arrived: false, walkFinished: false, exitWindowFinished: false, exitWalkFinished: false };
+      setArrivalReady(false); setExitReady(false); setActive(task); setIsResponding(false); setPresentationPhase('walking_in');
+    });
+    const unsubArrived = window.avatarApp.onReminderArrived(taskId => {
+      if (presentationRef.current.id !== String(taskId)) return;
+      presentationRef.current.arrived = true;
+      setArrivalReady(true);
+      if (presentationRef.current.walkFinished) setPresentationPhase('idle');
+    });
+    return () => { unsubReminder(); unsubArrived(); window.speechSynthesis?.cancel(); };
   }, []);
   useEffect(() => window.avatarApp.onTasksChanged(refresh), []);
   useEffect(() => {
-    if (!isOverlay) return;
-    if (!settings.speakReminders) { window.speechSynthesis?.cancel(); return; }
-    if (active) speak(active.message || `It's time for ${active.title}.`, settings);
-  }, [settings.speakReminders]);
+    if (!isOverlay || presentationPhase !== 'presenting' || !active || !settingsLoaded || !settings.speakReminders) return;
+    const id = String(active.id);
+    if (spokenReminderIds.current.has(id)) return;
+    spokenReminderIds.current.add(id);
+    speak(reminderSpeech(active), settings,
+      () => setPresentationPhase(current => current === 'presenting' ? 'talking' : current),
+      () => setPresentationPhase(current => current === 'talking' ? 'presenting' : current));
+  }, [isOverlay, presentationPhase, active, settingsLoaded, settings.speakReminders]);
+  useEffect(() => { if (isOverlay && !settings.speakReminders) window.speechSynthesis?.cancel(); }, [isOverlay, settings.speakReminders]);
   useEffect(() => {
     if (!calendarStatus.connected || isOverlay) return;
     (async () => {
@@ -73,7 +105,58 @@ function App() {
       setTitle(''); setDate(''); setTime(''); setMessage(''); await refresh(); setNotice('Reminder saved.');
     } catch (e2) { setError(e2.message); }
   }
-  async function respondTask(task, response) { try { await window.avatarApp.respondToTask(task.id, response); if (response === 'done' || isOverlay) speak(response === 'done' ? 'Great job! I marked that as done.' : response === 'snooze' ? 'Okay. I will remind you again in 30 minutes.' : 'Okay, I have recorded your response.', settings); if (active?.id === task.id || isOverlay) { await window.avatarApp.dismissOverlay(); setActive(null); } await refresh(); } catch (e) { setError(e.message); } }
+  async function respondTask(task, response) {
+    if (isOverlay && isResponding) return;
+    if (isOverlay) setIsResponding(true);
+    try {
+      await window.avatarApp.respondToTask(task.id, response);
+      if (isOverlay) {
+        presentationRef.current.exitWindowFinished = false;
+        presentationRef.current.exitWalkFinished = false;
+        setPresentationPhase(`reacting-${response}`);
+      } else if (active?.id === task.id) {
+        await window.avatarApp.dismissOverlay();
+        setActive(null);
+      }
+      await refresh();
+    } catch (e) { if (isOverlay) setIsResponding(false); setError(e.message); }
+  }
+  function onAvatarAnimationComplete(state) {
+    const current = presentationRef.current;
+    if (state === 'walking_in' && presentationPhase === 'walking_in' && current.id === String(activeRef.current?.id)) {
+      current.walkFinished = true;
+      if (current.arrived) setPresentationPhase('idle');
+    } else if (state === 'idle' && presentationPhase === 'idle') {
+      setPresentationPhase('board_entering');
+    } else if (state.startsWith('reacting-') && presentationPhase === state) {
+      setPresentationPhase('walking_out');
+    } else if (state === 'walking_out' && presentationPhase === 'walking_out') {
+      current.exitWalkFinished = true;
+      finishOverlayExitIfReady();
+    }
+  }
+  function finishOverlayExitIfReady() {
+    const current = presentationRef.current;
+    if (!current.exitWalkFinished || !current.exitWindowFinished) return;
+    window.avatarApp.dismissOverlay().finally(() => {
+      presentationRef.current = { id: null, arrived: false, walkFinished: false, exitWindowFinished: false, exitWalkFinished: false };
+      activeRef.current = null; setActive(null); setArrivalReady(false); setExitReady(false); setPresentationPhase('hidden'); setIsResponding(false);
+    });
+  }
+  useEffect(() => {
+    if (!isOverlay || presentationPhase !== 'walking_out') return;
+    let cancelled = false;
+    window.avatarApp.walkOutOverlay().then(() => {
+      if (cancelled) return;
+      presentationRef.current.exitWindowFinished = true;
+      setExitReady(true);
+      finishOverlayExitIfReady();
+    }).catch(error => setError(`The avatar could not walk off-screen: ${error.message}`));
+    return () => { cancelled = true; };
+  }, [isOverlay, presentationPhase]);
+  function onBoardAnimationEnd(event) {
+    if (event.target === event.currentTarget && presentationPhase === 'board_entering') setPresentationPhase('presenting');
+  }
   async function respond(response) { if (active) await respondTask(active, response); }
   function startVoice() {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -132,7 +215,7 @@ function App() {
     return false;
   });
   const visibleCalendarEvents = events.filter(event => event.start_at && new Date(event.start_at).getFullYear() === currentYear);
-  if (isOverlay) return <main className="overlay-shell"><div className="overlay-character"><AvatarScene state={active ? 'walkingIn' : 'idle'} /></div>{active && <section className="overlay-card"><strong>Hey, quick reminder!</strong><p>{active.message || `It's time for ${active.title}.`}</p><small>{active.title}</small><div className="response-row"><button className="primary" onClick={() => respond('done')}>Done</button><button onClick={() => respond('snooze')}>Remind me later</button><button className="quiet" onClick={() => respond('dismiss')}>Dismiss</button></div></section>}</main>;
+  if (isOverlay) return <main className="overlay-shell"><div className="overlay-character"><AvatarScene state={presentationPhase} arrivalReady={arrivalReady} exitReady={exitReady} onAnimationComplete={onAvatarAnimationComplete} onError={message => console.error('[avatar-renderer]', message)} /></div>{active && ['board_entering', 'presenting', 'talking'].includes(presentationPhase) && <section className={`overlay-card${presentationPhase === 'board_entering' ? ' board-entering' : ''}`} onAnimationEnd={onBoardAnimationEnd} aria-live="polite"><div className="overlay-kicker">AVATAR REMINDER</div><h2>{active.title}</h2><small className="overlay-time">Scheduled · {reminderTime(active)}</small><p>{active.message || 'Your reminder is due.'}</p><div className="response-row"><button className="primary" disabled={isResponding} onClick={() => respond('done')}>Done</button><button disabled={isResponding} onClick={() => respond('snooze')}>Snooze / Later</button><button className="quiet" disabled={isResponding} onClick={() => respond('dismiss')}>Dismiss</button></div></section>}</main>;
   return <main className="app-shell">
     <header className="topbar"><div><div className="eyebrow">YOUR DESKTOP COMPANION</div><h1>Avatar Reminder</h1></div><div className="response-row"><button onClick={() => window.avatarApp.testReminder()}>Test reminder</button><button className="icon-button" onClick={() => window.avatarApp.hideWindow()} aria-label="Hide window">—</button></div></header>
     <section className="panel"><h2>Create a reminder</h2><form onSubmit={createTask} className="task-form"><label>Task title<div className="input-action"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Drink water" required /><button type="button" onClick={startVoice} aria-label="Speak a task">{listening ? 'Listening…' : '🎙 Mic'}</button></div></label><div className="date-time-row"><label>Reminder date<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label><label>Reminder time<input type="time" value={time} onChange={e => setTime(e.target.value)} /></label></div><label>Message shown on screen<input value={message} onChange={e => setMessage(e.target.value)} placeholder="Hey! Take a short break." /></label><button className="primary" type="submit">Add reminder</button></form></section>
