@@ -7,9 +7,47 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "vite build",
+    "dist:win": "npm run build && electron-builder --win --x64",
     "test": "node --test electron/calendar.test.cjs electron/reminders.test.cjs electron/basic-needs.test.cjs",
     "start": "electron .",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
+  },
+  "build": {
+    "appId": "com.avatarreminder.desktop",
+    "productName": "Avatar Reminder",
+    "directories": {
+      "output": "release",
+      "buildResources": "public/icons"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "win": {
+      "icon": "public/icons/tray-reminder.svg",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Avatar Reminder",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-Portable.${ext}"
+    }
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.2",
@@ -23,6 +61,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "electron": "^34.0.0",
+    "electron-builder": "^26.18.0",
     "electron-rebuild": "^3.2.9",
     "vite": "^6.1.0",
     "wait-on": "^8.0.2"

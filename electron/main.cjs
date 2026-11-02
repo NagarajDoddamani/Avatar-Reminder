@@ -25,7 +25,7 @@ let currentReminderId = null;
 let overlayLoaded = false;
 let calendarSyncInProgress = false;
 let avatarWalkTimer;
-const appIconSvgPath = path.join(__dirname, '..', 'assets', 'icons', 'tray-reminder.svg');
+const appIconSvgPath = path.join(__dirname, '..', app.isPackaged ? 'dist' : 'public', 'icons', 'tray-reminder.svg');
 let appIconImage = nativeImage.createEmpty();
 if (process.platform === 'win32') app.setAppUserModelId('AvatarReminder.Desktop');
 const DEFAULT_SETTINGS = {
@@ -377,6 +377,7 @@ function registerIpc() {
 }
 
 app.whenReady().then(async () => {
+  app.setPath('userData', path.join(app.getPath('appData'), 'avatar-reminder'));
   try { appIconImage = await loadSvgAppIcon(); }
   catch (error) { console.error('[app-icon] Could not render SVG icon:', error.message); }
   db = openDatabase(path.join(app.getPath('userData'), 'avatar-reminder.sqlite3'));
@@ -409,6 +410,9 @@ app.whenReady().then(async () => {
     { label: 'Show reminder', click: () => mainWindow.show() },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
   ]));
+}).catch(error => {
+  console.error('[startup] Initialization failed:', error?.message || 'Unknown startup error.');
+  app.quit();
 });
 
 app.on('activate', () => {

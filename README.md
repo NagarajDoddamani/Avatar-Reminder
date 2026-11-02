@@ -1,4 +1,4 @@
-# Avatar Reminder — Windows starter
+﻿# Avatar Reminder â€” Windows starter
 
 This is a runnable starter scaffold for a local-first Electron reminder app. It includes:
 - Transparent, always-on-top desktop window and tray menu
@@ -33,11 +33,25 @@ Put a rigged GLB character at `public/models/avatar.glb`. The app loads it with 
 5. Download its JSON file.
 6. Copy it to the application's user data folder as `google-credentials.json`.
 
-For a development build, the user data directory is printed by Electron APIs; on Windows it is typically under `%APPDATA%` in an app-specific folder. To make the folder name stable, set `app.setName('Avatar Reminder')` before `app.whenReady()` or inspect `app.getPath('userData')` while debugging.
+The app keeps its user data in `%APPDATA%\avatar-reminder` on Windows for both development and installed builds. The SQLite database and OAuth token store stay there across application updates and uninstall; uninstalling does not delete user data. Place `google-credentials.json` in this directory.
 
 The OAuth callback uses `http://127.0.0.1:43827/oauth2callback`. If Google rejects the redirect configuration, follow the current Google OAuth Desktop-app guidance for the selected client type rather than switching to a web client blindly.
 
 This scaffold asks for read-only calendar access plus event creation. Review the current Google OAuth verification/testing rules before distributing the app.
+
+## Build and install on Windows
+
+Use a current Node.js LTS release and run:
+
+```powershell
+npm install
+npm test
+npm run dist:win
+```
+
+The Windows x64 NSIS installer and portable executable are written to `release/`. The installer creates a desktop shortcut and Start menu shortcut, supports choosing an install directory, and has an uninstaller. The app's user data remains under `%APPDATA%\avatar-reminder` after uninstall. The Windows executable icon is generated from `public/icons/tray-reminder.svg`; the tray and app window use this same SVG artwork. The packaged renderer, model, styles, Electron main/preload code, and SQLite initialization are included.
+
+To install, run the `Avatar Reminder-0.1.0-x64-Setup.exe` installer from `release/`. Launch Avatar Reminder from the desktop or Start menu. The portable build can be run directly; it still stores user data in `%APPDATA%\avatar-reminder`.
 
 ## Calendar reminders and task lifecycle
 
@@ -61,7 +75,7 @@ Reminder definitions are stored in `basic_reminders`. The scheduler creates one 
 
 1. Add incremental Google sync tokens and remote event deletion reconciliation outside the selected date range.
 2. Add a supported Windows background/startup mechanism if reminders must fire after choosing Quit.
-3. Add robust retry handling, packaged Windows builds, and a stricter production Content Security Policy.
+3. Add robust retry handling and a stricter production Content Security Policy.
 
 ## Database tables
 
@@ -72,3 +86,4 @@ Reminder definitions are stored in `basic_reminders`. The scheduler creates one 
 - `calendar_events`: source event metadata and stable calendar/event identifiers
 - `calendar_sync_state`: per-calendar incremental Google sync tokens
 - `basic_reminders`: persistent Basic Needs and user-created recurring reminder definitions
+
