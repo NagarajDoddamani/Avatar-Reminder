@@ -35,7 +35,7 @@ function reminderTime(task) {
   return scheduled ? new Date(scheduled).toLocaleString() : 'Now';
 }
 function reminderSpeech(task) {
-  return `${task.title}. Scheduled for ${reminderTime(task)}. ${task.message || 'Your reminder is due.'}`;
+  return task.message ? `${task.title}. ${task.message}` : task.title;
 }
 function playReminderChime() {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -432,7 +432,7 @@ function ControlCenter({ app: a }) {
   const control = (title, key, type='text', props={}) => <label>{title}<input type={type} value={a.settings[key] ?? ''} {...props} onChange={e => a.updateSetting(key,type === 'number' ? Number(e.target.value) : e.target.value)} /></label>;
   if (!a.settingsLoaded) return <main className="loading-shell"><div className="loading-mark">AR</div><strong>Loading Avatar Reminder…</strong><span>Connecting to your local reminders</span></main>;
   return <main className={`control-center theme-${a.settings.theme || 'dark'}`}>
-    <aside className="sidebar"><div className="brand"><div className="brand-icon">A</div><div><strong>Avatar Reminder</strong><small>DESKTOP COMPANION</small></div></div><nav className="side-nav">{nav.map(([id,name]) => <button className={a.page === id ? 'active' : ''} key={id} onClick={() => { a.setError(''); a.setNotice(''); a.setPage(id); }}><span className="nav-bullet">{['◈','◷','♡','▦','≡','⚙'][nav.findIndex(row=>row[0]===id)]}</span>{name}{id === 'myReminders' && a.upcoming.length > 0 && <em>{a.upcoming.length}</em>}</button>)}</nav><div className="sidebar-bottom"><span className={`connection-dot ${a.calendarStatus.connected ? 'online' : ''}`} />{a.calendarStatus.connected ? 'Google Calendar connected' : 'Calendar not connected'}<button className="test-reminder" onClick={() => window.avatarApp.testReminder()}>＋ Test reminder</button><small>Avatar Reminder · Desktop</small></div></aside>
+    <aside className="sidebar"><div className="brand"><div><strong>Avatar Reminder</strong><small>DESKTOP COMPANION</small></div></div><nav className="side-nav">{nav.map(([id,name]) => <button className={a.page === id ? 'active' : ''} key={id} onClick={() => { a.setError(''); a.setNotice(''); a.setPage(id); }}><span className="nav-bullet">{['◈','◷','♡','▦','≡','⚙'][nav.findIndex(row=>row[0]===id)]}</span>{name}{id === 'myReminders' && a.upcoming.length > 0 && <em>{a.upcoming.length}</em>}</button>)}</nav><div className="sidebar-bottom"><span className={`connection-dot ${a.calendarStatus.connected ? 'online' : ''}`} />{a.calendarStatus.connected ? 'Google Calendar connected' : 'Calendar not connected'}<button className="test-reminder" onClick={() => window.avatarApp.testReminder()}>＋ Test reminder</button><small>Avatar Reminder · Desktop</small></div></aside>
     <section className="workspace"><header className="workspace-header"><div><div className="eyebrow">{label.toUpperCase()}</div><h1>{a.page === 'dashboard' ? 'Good day' : label}</h1></div><div className="header-right"><span>{new Date().toLocaleDateString(undefined,{weekday:'short',month:'long',day:'numeric'})}</span><button onClick={a.refresh}>↻ Refresh</button><button className="icon-button" onClick={() => window.avatarApp.hideWindow()} aria-label="Hide window">—</button></div></header>
     {(a.error || a.notice) && <div className={`notice ${a.error ? 'error' : ''}`}>{a.error || a.notice}<button className="notice-close" onClick={() => {a.setError('');a.setNotice('');}}>×</button></div>}
     <div className="page-content">

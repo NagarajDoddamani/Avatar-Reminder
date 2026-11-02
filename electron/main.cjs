@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, shell, safeStorage, powerMonitor, net } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { screen } = require('electron');
@@ -24,6 +25,9 @@ let currentReminderId = null;
 let overlayLoaded = false;
 let calendarSyncInProgress = false;
 let avatarWalkTimer;
+const appIconSvgPath = path.join(__dirname, '..', 'assets', 'icons', 'tray-reminder.svg');
+let appIconImage = nativeImage.createEmpty();
+if (process.platform === 'win32') app.setAppUserModelId('AvatarReminder.Desktop');
 const DEFAULT_SETTINGS = {
   speakReminders: true, syncCalendar: true, quietStart: '', quietEnd: '', speechVolume: 0.85, speechRate: 0.96,
   speechVoice: '', avatarEnabled: true, avatarPosition: 'center', avatarSize: 'medium', animationSpeed: 1,
@@ -41,6 +45,7 @@ function createWindow() {
     height: 840,
     minWidth: 900,
     minHeight: 620,
+    icon: appIconImage,
     show: !setting('startMinimized', false),
     frame: true,
     transparent: false,
@@ -88,6 +93,24 @@ function createAvatarWindow() {
     displayNextReminder();
   });
   avatarWindow.setAlwaysOnTop(setting('alwaysOnTopOverlay', true), 'screen-saver');
+}
+
+async function loadSvgAppIcon() {
+  const svg = fs.readFileSync(appIconSvgPath, 'utf8');
+  const svgBase64 = Buffer.from(svg, 'utf8').toString('base64');
+  const rasterizer = new BrowserWindow({
+    width: 64, height: 64, show: false, frame: false, transparent: true, backgroundColor: '#00000000', offscreen: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  try {
+    await rasterizer.loadURL(`data:image/svg+xml;base64,${svgBase64}`);
+    await rasterizer.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const icon = await rasterizer.webContents.capturePage({ x: 0, y: 0, width: 64, height: 64 });
+    if (icon.isEmpty()) throw new Error('Electron returned an empty icon image.');
+    return icon;
+  } finally {
+    if (!rasterizer.isDestroyed()) rasterizer.destroy();
+  }
 }
 
 function displayNextReminder() {
@@ -154,13 +177,13 @@ function walkOverlayOffScreen() {
 function showReminder(task) {
   if (task.id === currentReminderId || reminderQueue.some(item => item.id === task.id)) return;
   if (!setting('visualReminders', true)) {
-    if (Notification.isSupported()) new Notification({ title: task.title, body: task.message || 'Your reminder is due.' }).show();
+    if (Notification.isSupported()) new Notification({ title: task.title, body: task.message || 'Your reminder is due.', icon: appIconImage }).show();
     return;
   }
   reminderQueue.push(task);
   if (overlayLoaded && avatarWindow && !avatarWindow.isVisible()) displayNextReminder();
   if (Notification.isSupported()) {
-    new Notification({ title: task.title, body: task.message || 'Your reminder is due.' }).show();
+    new Notification({ title: task.title, body: task.message || 'Your reminder is due.', icon: appIconImage }).show();
   }
 }
 
@@ -353,7 +376,9 @@ function registerIpc() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try { appIconImage = await loadSvgAppIcon(); }
+  catch (error) { console.error('[app-icon] Could not render SVG icon:', error.message); }
   db = openDatabase(path.join(app.getPath('userData'), 'avatar-reminder.sqlite3'));
   seedBasicNeedsReminders(db);
   calendar = createCalendarService({
@@ -376,7 +401,9 @@ app.whenReady().then(() => {
   }, 30000);
   powerMonitor.on('resume', () => { scheduleLoop(); syncSelectedCalendars('resume'); });
 
-  tray = new Tray(nativeImage.createEmpty());
+  let trayImage = appIconImage;
+  if (process.platform === 'win32' && !trayImage.isEmpty()) trayImage = trayImage.resize({ width: 16, height: 16 });
+  tray = new Tray(trayImage);
   tray.setToolTip('Avatar Reminder');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show reminder', click: () => mainWindow.show() },
