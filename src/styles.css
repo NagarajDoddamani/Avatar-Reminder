@@ -1,7 +1,7 @@
 :root { font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #eef3fa; background: transparent; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; background: transparent; }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { border: 1px solid #354254; background: #202b39; color: #eaf1fb; border-radius: 10px; padding: 9px 12px; cursor: pointer; }
 button:hover { background: #2c3b4d; }
 button:disabled { opacity: .45; cursor: not-allowed; }
@@ -26,6 +26,7 @@ h2 { font-size: 14px; margin: 0 0 12px; }
 .task-form { display: grid; gap: 9px; }
 label { display: grid; gap: 5px; color: #c6d3e2; font-size: 11px; }
 input { width: 100%; border: 1px solid #3b4a5f; border-radius: 8px; background: #111a26; color: #eef3fa; padding: 10px; min-width: 0; }
+select, textarea { width: 100%; border: 1px solid #3b4a5f; border-radius: 8px; background: #111a26; color: #eef3fa; padding: 10px; min-width: 0; }
 .task-list { display: grid; gap: 8px; }
 .task-row, .event-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid #334052; padding-top: 9px; }
 .task-copy { display: grid; gap: 4px; min-width: 0; }
@@ -74,3 +75,24 @@ input[type="range"] { padding: 5px 0; }
 .task-filters button.selected { background: #2979d5; border-color: #2979d5; }
 .task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .task-actions button { font-size: 10px; white-space: nowrap; }
+.main-header-actions { display: flex; align-items: center; gap: 12px; }
+.page-nav { display: flex; gap: 6px; }
+.page-nav button { font-size: 10px; padding: 7px 9px; }
+.page-nav button.selected { background: #2979d5; border-color: #2979d5; }
+.basic-heading { align-items: center; margin: 12px 0; }
+.basic-heading p { margin: 0; }
+.basic-reminder-list { display: grid; gap: 8px; }
+.basic-reminder-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin: 0; }
+.basic-reminder-copy { flex: 1; min-width: 0; }
+.basic-reminder-copy .section-heading { margin-bottom: 5px; }
+.basic-reminder-copy h2 { margin: 0; overflow-wrap: anywhere; }
+.basic-reminder-copy small { display: block; margin-top: 4px; color: #9cacc0; font-size: 10px; }
+.days-field { border: 1px solid #3b4a5f; border-radius: 8px; padding: 8px 10px; }
+.days-field legend { color: #c6d3e2; font-size: 11px; padding: 0 4px; }
+.days-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.days-checks .check-setting { margin: 2px 0; }
+.basic-editor { max-width: 660px; }
+@media (max-width: 560px) {
+  .topbar, .main-header-actions, .basic-reminder-row { align-items: flex-start; flex-direction: column; }
+  .main-header-actions { width: 100%; gap: 4px; }
+}

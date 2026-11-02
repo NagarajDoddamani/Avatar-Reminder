@@ -31,7 +31,7 @@ test('lists calendar metadata and imports paginated ordinary, all-day, recurring
     transaction(fn) { return fn; }
   };
   let listRequests = [];
-  let meetingEvent = { id: 'meeting-1', summary: 'Planning', description: 'Agenda', location: 'Room 2', start: { dateTime: '2026-10-24T09:00:00-04:00' }, end: { dateTime: '2026-10-24T10:00:00-04:00' }, recurrence: ['RRULE:FREQ=WEEKLY'], recurringEventId: 'meeting-series', originalStartTime: { dateTime: '2026-10-24T09:00:00-04:00' }, status: 'confirmed', eventType: 'default' };
+  let meetingEvent = { id: 'meeting-1', summary: 'Planning', description: 'Agenda', location: 'Room 2', start: { dateTime: '2026-11-24T09:00:00-04:00' }, end: { dateTime: '2026-11-24T10:00:00-04:00' }, recurrence: ['RRULE:FREQ=WEEKLY'], recurringEventId: 'meeting-series', originalStartTime: { dateTime: '2026-11-24T09:00:00-04:00' }, status: 'confirmed', eventType: 'default' };
   const fakeGoogle = {
     auth: { OAuth2: class { setCredentials(value) { this.credentials = value; } } },
     calendar: () => ({
@@ -43,8 +43,8 @@ test('lists calendar metadata and imports paginated ordinary, all-day, recurring
         if (params.syncToken === 'expired-token') { const error=new Error('Sync token expired');error.response={status:410};throw error; }
         if (params.syncToken) return { data: { items: [meetingEvent], nextSyncToken:'sync-token-2' } };
         if (params.pageToken) return { data: { items: [
-          { id: 'all-day-1', summary: 'Company day', start: { date: '2026-10-25' }, end: { date: '2026-10-26' }, status: 'confirmed', eventType: 'default' },
-          { id: 'birthday-1', summary: 'Birthday', start: { dateTime: '2026-10-26T09:00:00-04:00' }, end: { dateTime: '2026-10-26T09:30:00-04:00' }, eventType: 'birthday', status: 'confirmed' }
+          { id: 'all-day-1', summary: 'Company day', start: { date: '2026-11-25' }, end: { date: '2026-11-26' }, status: 'confirmed', eventType: 'default' },
+          { id: 'birthday-1', summary: 'Birthday', start: { dateTime: '2026-11-26T09:00:00-04:00' }, end: { dateTime: '2026-11-26T09:30:00-04:00' }, eventType: 'birthday', status: 'confirmed' }
         ], nextSyncToken:'sync-token-1' } };
         return { data: { items: [meetingEvent], nextPageToken: 'event-page-2' } };
       } }
@@ -54,7 +54,7 @@ test('lists calendar metadata and imports paginated ordinary, all-day, recurring
     const service = createCalendarService({ app: {}, db, safeStorage: { isEncryptionAvailable: () => false }, credentialsPath, googleClient: fakeGoogle });
     const calendars = await service.listCalendars();
     assert.deepEqual(calendars.map(({ syncId }) => syncId), ['primary', 'shared-id']);
-    const result = await service.syncCalendars({ calendarIds: ['primary'], timeMin: '2026-10-01T00:00:00.000Z', timeMax: '2026-11-01T00:00:00.000Z' });
+    const result = await service.syncCalendars({ calendarIds: ['primary'], timeMin: '2026-11-01T00:00:00.000Z', timeMax: '2026-12-01T00:00:00.000Z' });
     assert.deepEqual({ success: result.success, calendarsChecked: result.calendarsChecked, eventsRetrieved: result.eventsRetrieved, eventsAdded: result.eventsAdded, eventsUpdated: result.eventsUpdated }, { success: true, calendarsChecked: 1, eventsRetrieved: 3, eventsAdded: 3, eventsUpdated: 0 });
     assert.equal(listRequests.length, 2);
     assert.equal(listRequests[0].calendarId, 'primary');
@@ -68,30 +68,30 @@ test('lists calendar metadata and imports paginated ordinary, all-day, recurring
     assert.equal(meeting[8], 0);
     assert.deepEqual(JSON.parse(meeting[9]), ['RRULE:FREQ=WEEKLY']);
     assert.equal(meeting[10], 'meeting-series');
-    assert.equal(meeting[11], '2026-10-24T09:00:00-04:00');
+    assert.equal(meeting[11], '2026-11-24T09:00:00-04:00');
     assert.equal(savedRows.get('primary|all-day-1').args[8], 1);
     assert.equal(savedRows.has('primary|birthday-1'), true);
     assert.equal(savedTasks.size,3);
     assert.equal(savedTasks.get('primary|meeting-1').source,'google_calendar');
     assert.equal(savedTasks.get('primary|meeting-1').lifecycle_status,'scheduled');
-    const secondSync = await service.syncCalendars({ calendarIds: ['primary'], timeMin: '2026-10-01T00:00:00.000Z', timeMax: '2026-11-01T00:00:00.000Z' });
+    const secondSync = await service.syncCalendars({ calendarIds: ['primary'], timeMin: '2026-11-01T00:00:00.000Z', timeMax: '2026-12-01T00:00:00.000Z' });
     assert.equal(secondSync.eventsAdded, 0);
     assert.equal(secondSync.eventsUpdated, 3);
     assert.equal(savedRows.size, 3);
     assert.equal(savedTasks.size,3);
     const allDayTask=savedTasks.get('primary|all-day-1');
     assert.equal(new Date(allDayTask.scheduled_reminder_at).getHours(),9);
-    meetingEvent={...meetingEvent,summary:'Planning moved',description:'New agenda',start:{dateTime:'2026-10-25T10:00:00Z'},end:{dateTime:'2026-10-25T11:00:00Z'},originalStartTime:{dateTime:'2026-10-25T10:00:00Z'}};
-    await service.syncCalendars({calendarIds:['primary'],timeMin:'2026-10-01T00:00:00.000Z',timeMax:'2026-11-01T00:00:00.000Z'});
+    meetingEvent={...meetingEvent,summary:'Planning moved',description:'New agenda',start:{dateTime:'2026-11-25T10:00:00Z'},end:{dateTime:'2026-11-25T11:00:00Z'},originalStartTime:{dateTime:'2026-11-25T10:00:00Z'}};
+    await service.syncCalendars({calendarIds:['primary'],timeMin:'2026-11-01T00:00:00.000Z',timeMax:'2026-12-01T00:00:00.000Z'});
     const linkedTask=savedTasks.get('primary|meeting-1');
     assert.equal(linkedTask.title,'Planning moved');
     assert.equal(linkedTask.lifecycle_status,'scheduled');
-    assert.equal(linkedTask.scheduled_reminder_at,'2026-10-25T10:00:00.000Z');
+    assert.equal(linkedTask.scheduled_reminder_at,'2026-11-25T10:00:00.000Z');
     meetingEvent={id:'meeting-1',status:'cancelled'};
-    await service.syncCalendars({calendarIds:['primary'],timeMin:'2026-10-01T00:00:00.000Z',timeMax:'2026-11-01T00:00:00.000Z'});
+    await service.syncCalendars({calendarIds:['primary'],timeMin:'2026-11-01T00:00:00.000Z',timeMax:'2026-12-01T00:00:00.000Z'});
     assert.equal(linkedTask.lifecycle_status,'cancelled');
     assert.equal(savedRows.get('primary|meeting-1').title,'Planning moved');
-    meetingEvent={id:'meeting-1',summary:'Planning restored',description:'Agenda restored',start:{dateTime:'2026-10-26T10:00:00Z'},end:{dateTime:'2026-10-26T11:00:00Z'},status:'confirmed'};
+    meetingEvent={id:'meeting-1',summary:'Planning restored',description:'Agenda restored',start:{dateTime:'2026-11-26T10:00:00Z'},end:{dateTime:'2026-11-26T11:00:00Z'},status:'confirmed'};
     const beforeInitialToken=listRequests.length;
     await service.syncCalendars({calendarIds:['primary'],incremental:true});
     assert.equal(syncStates.get('primary').sync_token,'sync-token-1');

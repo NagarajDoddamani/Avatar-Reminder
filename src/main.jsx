@@ -34,6 +34,23 @@ function reminderTime(task) {
 function reminderSpeech(task) {
   return `${task.title}. Scheduled for ${reminderTime(task)}. ${task.message || 'Your reminder is due.'}`;
 }
+function playReminderChime() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const context = new AudioContext();
+  context.resume().then(() => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+    oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(660, now);
+    oscillator.frequency.setValueAtTime(880, now + 0.12);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+    oscillator.connect(gain); gain.connect(context.destination); oscillator.start(); oscillator.stop(now + 0.34);
+    oscillator.onended = () => context.close();
+  }).catch(() => context.close());
+}
 function App() {
   const [tasks, setTasks] = useState([]), [active, setActive] = useState(null);
   const activeRef = useRef(active);
@@ -42,11 +59,18 @@ function App() {
   useEffect(() => { activeRef.current = active; }, [active]);
   const [settingsLoaded, setSettingsLoaded] = useState(false), [presentationPhase, setPresentationPhase] = useState('hidden'), [isResponding, setIsResponding] = useState(false);
   const [arrivalReady, setArrivalReady] = useState(false), [exitReady, setExitReady] = useState(false);
+  const [page, setPage] = useState('reminders'), [basicNeeds, setBasicNeeds] = useState([]), [basicForm, setBasicForm] = useState(null), [basicSaving, setBasicSaving] = useState(false);
   const presentationRef = useRef({ id: null, arrived: false, walkFinished: false, exitWindowFinished: false, exitWalkFinished: false });
   const spokenReminderIds = useRef(new Set());
+  const chimedReminderIds = useRef(new Set());
   const [calendarStatus, setCalendarStatus] = useState({ connected: false, credentialsConfigured: false }), [events, setEvents] = useState([]), [error, setError] = useState(''), [notice, setNotice] = useState(''), [listening, setListening] = useState(false), [taskFilter, setTaskFilter] = useState('upcoming');
   const [calendars, setCalendars] = useState([]), [selectedCalendarIds, setSelectedCalendarIds] = useState([]), [syncRange, setSyncRange] = useState(() => { const start = new Date(); start.setDate(start.getDate() - 30); const end = new Date(); end.setDate(end.getDate() + 365); return { from: dateInputValue(start), to: dateInputValue(end) }; }), [syncing, setSyncing] = useState(false);
   const refresh = async () => { try { setTasks(await window.avatarApp.listTasks()); setCalendarStatus(await window.avatarApp.calendarStatus()); setSettings(await window.avatarApp.getSettings()); setSettingsLoaded(true); } catch (e) { setError(e.message); } };
+  async function loadBasicNeeds() {
+    try { setBasicNeeds(await window.avatarApp.listBasicNeeds()); }
+    catch (e) { setError(`Could not load Basic Needs reminders: ${e.message}`); }
+  }
+  useEffect(() => { if (page === 'basicNeeds') loadBasicNeeds(); }, [page, tasks]);
   useEffect(() => {
     refresh();
     const unsubReminder = window.avatarApp.onReminder(task => {
@@ -66,7 +90,7 @@ function App() {
   }, []);
   useEffect(() => window.avatarApp.onTasksChanged(refresh), []);
   useEffect(() => {
-    if (!isOverlay || presentationPhase !== 'presenting' || !active || !settingsLoaded || !settings.speakReminders) return;
+    if (!isOverlay || presentationPhase !== 'presenting' || !active || !settingsLoaded || !settings.speakReminders || active.speak_enabled === 0) return;
     const id = String(active.id);
     if (spokenReminderIds.current.has(id)) return;
     spokenReminderIds.current.add(id);
@@ -74,6 +98,13 @@ function App() {
       () => setPresentationPhase(current => current === 'presenting' ? 'talking' : current),
       () => setPresentationPhase(current => current === 'talking' ? 'presenting' : current));
   }, [isOverlay, presentationPhase, active, settingsLoaded, settings.speakReminders]);
+  useEffect(() => {
+    if (!isOverlay || presentationPhase !== 'presenting' || !active || active.sound_enabled !== 1) return;
+    const id = String(active.id);
+    if (chimedReminderIds.current.has(id)) return;
+    chimedReminderIds.current.add(id);
+    try { playReminderChime(); } catch (e) { console.warn('[reminder-sound] unavailable:', e.message); }
+  }, [isOverlay, presentationPhase, active]);
   useEffect(() => { if (isOverlay && !settings.speakReminders) window.speechSynthesis?.cancel(); }, [isOverlay, settings.speakReminders]);
   useEffect(() => {
     if (!calendarStatus.connected || isOverlay) return;
@@ -179,6 +210,38 @@ function App() {
   }
   async function updateSetting(key, value) { const next = { ...settings, [key]: value }; setSettings(next); try { await window.avatarApp.saveSettings({ [key]: value }); } catch (e) { setError(e.message); } }
   async function connectCalendar() { setError(''); try { await window.avatarApp.connectCalendar(); await refresh(); } catch (e) { setError(e.message); } }
+  function editBasicReminder(reminder = null) {
+    if (!reminder) {
+      setBasicForm({ id: null, title: '', message: '', repeatMode: '30', customInterval: 90, startTime: '09:00', endTime: '21:00', activeDays: [0,1,2,3,4,5,6], enabled: false, soundEnabled: false, speakEnabled: true });
+      return;
+    }
+    const interval = reminder.interval_minutes == null ? null : Number(reminder.interval_minutes);
+    const mode = interval == null ? 'daily' : [15,20,30,45,60].includes(interval) ? String(interval) : 'custom';
+    setBasicForm({ id: reminder.id, title: reminder.title, message: reminder.message || '', repeatMode: mode, customInterval: mode === 'custom' ? interval : 90, startTime: reminder.start_time, endTime: reminder.end_time, activeDays: JSON.parse(reminder.active_days || '[0,1,2,3,4,5,6]'), enabled: Boolean(reminder.enabled), soundEnabled: Boolean(reminder.sound_enabled), speakEnabled: Boolean(reminder.speak_enabled) });
+  }
+  async function saveBasicForm(event) {
+    event.preventDefault(); setError(''); setNotice(''); setBasicSaving(true);
+    const intervalMinutes = basicForm.repeatMode === 'daily' ? null : basicForm.repeatMode === 'custom' ? Number(basicForm.customInterval) : Number(basicForm.repeatMode);
+    try {
+      await window.avatarApp.saveBasicReminder({ ...basicForm, intervalMinutes });
+      setBasicForm(null); await Promise.all([loadBasicNeeds(), refresh()]); setNotice('Basic reminder saved.');
+    } catch (e) { setError(e.message); }
+    finally { setBasicSaving(false); }
+  }
+  async function toggleBasicReminder(reminder) {
+    setError('');
+    try { await window.avatarApp.setBasicReminderEnabled(reminder.id, !reminder.enabled); await loadBasicNeeds(); await refresh(); }
+    catch (e) { setError(e.message); }
+  }
+  async function removeBasicReminder(reminder) {
+    if (!window.confirm(`Delete “${reminder.title}”? Its reminder history will remain in the task list.`)) return;
+    setError('');
+    try { await window.avatarApp.deleteBasicReminder(reminder.id); setBasicNeeds(await window.avatarApp.listBasicNeeds()); await refresh(); setNotice('Basic reminder deleted.'); }
+    catch (e) { setError(e.message); }
+  }
+  function toggleBasicDay(day) {
+    setBasicForm(current => ({ ...current, activeDays: current.activeDays.includes(day) ? current.activeDays.filter(item => item !== day) : [...current.activeDays, day].sort() }));
+  }
   async function toggleCalendar(syncId, checked) {
     const next = checked ? [...new Set([...selectedCalendarIds, syncId])] : selectedCalendarIds.filter(id => id !== syncId);
     setSelectedCalendarIds(next); try { await window.avatarApp.saveSettings({ calendarIds: next }); } catch (e) { setError(e.message); }
@@ -215,11 +278,32 @@ function App() {
     return false;
   });
   const visibleCalendarEvents = events.filter(event => event.start_at && new Date(event.start_at).getFullYear() === currentYear);
+  const intervalLabel = reminder => reminder.interval_minutes == null ? 'Once per active day' : `Every ${reminder.interval_minutes} minutes`;
   if (isOverlay) return <main className="overlay-shell"><div className="overlay-character"><AvatarScene state={presentationPhase} arrivalReady={arrivalReady} exitReady={exitReady} onAnimationComplete={onAvatarAnimationComplete} onError={message => console.error('[avatar-renderer]', message)} /></div>{active && ['board_entering', 'presenting', 'talking'].includes(presentationPhase) && <section className={`overlay-card${presentationPhase === 'board_entering' ? ' board-entering' : ''}`} onAnimationEnd={onBoardAnimationEnd} aria-live="polite"><div className="overlay-kicker">AVATAR REMINDER</div><h2>{active.title}</h2><small className="overlay-time">Scheduled · {reminderTime(active)}</small><p>{active.message || 'Your reminder is due.'}</p><div className="response-row"><button className="primary" disabled={isResponding} onClick={() => respond('done')}>Done</button><button disabled={isResponding} onClick={() => respond('snooze')}>Snooze / Later</button><button className="quiet" disabled={isResponding} onClick={() => respond('dismiss')}>Dismiss</button></div></section>}</main>;
+  if (page === 'basicNeeds') return <main className="app-shell">
+    <header className="topbar"><div><div className="eyebrow">PERSONAL ROUTINE</div><h1>Basic Needs</h1></div><nav className="page-nav"><button onClick={() => { setBasicForm(null); setPage('reminders'); }}>Reminders</button><button className="selected" onClick={() => setPage('basicNeeds')}>Basic Needs</button></nav></header>
+    {error && <div className="notice error">{error}</div>}{notice && <div className="notice">{notice}</div>}
+    {basicForm ? <section className="panel basic-editor"><h2>{basicForm.id ? 'Edit basic reminder' : 'Add basic reminder'}</h2><form onSubmit={saveBasicForm} className="task-form">
+      <label>Reminder title<input required maxLength={120} value={basicForm.title} onChange={e => setBasicForm({ ...basicForm, title: e.target.value })} placeholder="e.g. Take a walk" /></label>
+      <label>Description / message<input maxLength={500} value={basicForm.message} onChange={e => setBasicForm({ ...basicForm, message: e.target.value })} placeholder="A short message shown on the reminder board" /></label>
+      <label>Repeat interval<select value={basicForm.repeatMode} onChange={e => setBasicForm({ ...basicForm, repeatMode: e.target.value })}><option value="daily">Once per active day</option>{[15,20,30,45,60].map(minutes => <option key={minutes} value={minutes}>Every {minutes} minutes</option>)}<option value="custom">Custom interval</option></select></label>
+      {basicForm.repeatMode === 'custom' && <label>Custom interval in minutes<input type="number" min="1" max="1440" required value={basicForm.customInterval} onChange={e => setBasicForm({ ...basicForm, customInterval: e.target.value })} /></label>}
+      <div className="date-time-row"><label>Start time<input type="time" required value={basicForm.startTime} onChange={e => setBasicForm({ ...basicForm, startTime: e.target.value })} /></label><label>End time<input type="time" required value={basicForm.endTime} onChange={e => setBasicForm({ ...basicForm, endTime: e.target.value })} /></label></div>
+      <fieldset className="days-field"><legend>Active days</legend><div className="days-checks">{[['Mon',1],['Tue',2],['Wed',3],['Thu',4],['Fri',5],['Sat',6],['Sun',0]].map(([label, day]) => <label className="check-setting" key={day}><input type="checkbox" checked={basicForm.activeDays.includes(day)} onChange={() => toggleBasicDay(day)} />{label}</label>)}</div></fieldset>
+      <label className="check-setting"><input type="checkbox" checked={basicForm.enabled} onChange={e => setBasicForm({ ...basicForm, enabled: e.target.checked })} />Enabled</label>
+      <label className="check-setting"><input type="checkbox" checked={basicForm.soundEnabled} onChange={e => setBasicForm({ ...basicForm, soundEnabled: e.target.checked })} />Play a sound when it appears</label>
+      <label className="check-setting"><input type="checkbox" checked={basicForm.speakEnabled} onChange={e => setBasicForm({ ...basicForm, speakEnabled: e.target.checked })} />Speak this reminder when speech is enabled globally</label>
+      <div className="response-row"><button className="primary" type="submit" disabled={basicSaving}>{basicSaving ? 'Saving…' : 'Save reminder'}</button><button type="button" onClick={() => setBasicForm(null)}>Cancel</button></div>
+    </form></section> : <>
+      <div className="section-heading basic-heading"><p className="muted">Choose a template, adjust its schedule, and enable only the reminders you want.</p><button className="primary" onClick={() => editBasicReminder()}>Add Basic Reminder</button></div>
+      <div className="basic-reminder-list">{basicNeeds.map(reminder => <article className="panel basic-reminder-row" key={reminder.id}><div className="basic-reminder-copy"><div className="section-heading"><h2>{reminder.title}</h2><span className={`status ${reminder.enabled ? 'good' : ''}`}>{reminder.enabled ? 'Enabled' : 'Disabled'}</span></div><small>{intervalLabel(reminder)} · {reminder.start_time}–{reminder.end_time} · {JSON.parse(reminder.active_days || '[]').length} active day(s)</small><small>Next reminder: {reminder.enabled && reminder.next_reminder_at ? new Date(reminder.next_reminder_at).toLocaleString() : 'Not scheduled'}</small></div><div className="task-actions"><button onClick={() => editBasicReminder(reminder)}>Edit</button><button onClick={() => toggleBasicReminder(reminder)}>{reminder.enabled ? 'Pause' : 'Resume'}</button><button className="quiet" onClick={() => removeBasicReminder(reminder)}>Delete</button></div></article>)}</div>
+    </>}
+    <footer>Repeating reminder definitions stay saved when an individual occurrence is completed or skipped.</footer>
+  </main>;
   return <main className="app-shell">
-    <header className="topbar"><div><div className="eyebrow">YOUR DESKTOP COMPANION</div><h1>Avatar Reminder</h1></div><div className="response-row"><button onClick={() => window.avatarApp.testReminder()}>Test reminder</button><button className="icon-button" onClick={() => window.avatarApp.hideWindow()} aria-label="Hide window">—</button></div></header>
+    <header className="topbar"><div><div className="eyebrow">YOUR DESKTOP COMPANION</div><h1>Avatar Reminder</h1></div><div className="main-header-actions"><nav className="page-nav"><button className="selected" onClick={() => setPage('reminders')}>Reminders</button><button onClick={() => { setError(''); setNotice(''); setPage('basicNeeds'); }}>Basic Needs</button></nav><div className="response-row"><button onClick={() => window.avatarApp.testReminder()}>Test reminder</button><button className="icon-button" onClick={() => window.avatarApp.hideWindow()} aria-label="Hide window">—</button></div></div></header>
     <section className="panel"><h2>Create a reminder</h2><form onSubmit={createTask} className="task-form"><label>Task title<div className="input-action"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Drink water" required /><button type="button" onClick={startVoice} aria-label="Speak a task">{listening ? 'Listening…' : '🎙 Mic'}</button></div></label><div className="date-time-row"><label>Reminder date<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label><label>Reminder time<input type="time" value={time} onChange={e => setTime(e.target.value)} /></label></div><label>Message shown on screen<input value={message} onChange={e => setMessage(e.target.value)} placeholder="Hey! Take a short break." /></label><button className="primary" type="submit">Add reminder</button></form></section>
-    <section className="panel"><div className="section-heading"><h2>Your tasks</h2><button onClick={refresh}>Refresh</button></div><div className="task-filters">{['upcoming','due','completed','all'].map(filter => <button key={filter} className={taskFilter === filter ? 'selected' : ''} onClick={() => setTaskFilter(filter)}>{filter === 'upcoming' ? `Upcoming (${currentYear})` : filter[0].toUpperCase()+filter.slice(1)}</button>)}</div><div className="task-list">{visibleTasks.length === 0 && <p className="muted">No {taskFilter} tasks.</p>}{visibleTasks.map(task => { const remindAt = task.scheduled_reminder_at || task.due_at; const calendarName = calendars.find(item => item.syncId === task.calendar_id)?.name || task.calendar_id; return <article className="task-row" key={task.id}><div className="task-copy"><strong>{task.title}</strong><small>{task.source === 'google_calendar' ? 'Google Calendar' : 'Local Task'}{task.calendar_id ? ` · ${calendarName}` : ''} · {remindAt ? new Date(remindAt).toLocaleString() : 'No time set'} · {task.lifecycle_status || task.status}{task.all_day ? ` · All day (reminder ${settings.allDayReminderTime || '09:00'})` : ''}</small></div><div className="task-actions">{!['completed','archived','cancelled','dismissed'].includes(task.lifecycle_status) && <button onClick={() => respondTask(task,'done')}>Done</button>}{['notified','due'].includes(task.lifecycle_status) && <><button onClick={() => respondTask(task,'snooze')}>Snooze</button><button onClick={() => respondTask(task,'dismiss')}>Dismiss</button></>}{task.source !== 'google_calendar' && remindAt && !task.google_event_id && <button onClick={() => syncTask(task)}>Add to Calendar</button>}{task.google_event_id && <span className="synced">Calendar linked</span>}</div></article>; })}</div></section>
+    <section className="panel"><div className="section-heading"><h2>Your tasks</h2><button onClick={refresh}>Refresh</button></div><div className="task-filters">{['upcoming','due','completed','all'].map(filter => <button key={filter} className={taskFilter === filter ? 'selected' : ''} onClick={() => setTaskFilter(filter)}>{filter === 'upcoming' ? `Upcoming (${currentYear})` : filter[0].toUpperCase()+filter.slice(1)}</button>)}</div><div className="task-list">{visibleTasks.length === 0 && <p className="muted">No {taskFilter} tasks.</p>}{visibleTasks.map(task => { const remindAt = task.scheduled_reminder_at || task.due_at; const calendarName = calendars.find(item => item.syncId === task.calendar_id)?.name || task.calendar_id; const sourceName = task.source === 'google_calendar' ? 'Google Calendar' : task.source === 'basic_needs' ? 'Basic Needs' : 'Local Task'; return <article className="task-row" key={task.id}><div className="task-copy"><strong>{task.title}</strong><small>{sourceName}{task.calendar_id ? ` · ${calendarName}` : ''} · {remindAt ? new Date(remindAt).toLocaleString() : 'No time set'} · {task.lifecycle_status || task.status}{task.all_day ? ` · All day (reminder ${settings.allDayReminderTime || '09:00'})` : ''}</small></div><div className="task-actions">{!['completed','archived','cancelled','dismissed'].includes(task.lifecycle_status) && <button onClick={() => respondTask(task,'done')}>Done</button>}{['notified','due'].includes(task.lifecycle_status) && <><button onClick={() => respondTask(task,'snooze')}>Snooze</button><button onClick={() => respondTask(task,'dismiss')}>Dismiss</button></>}{task.source !== 'google_calendar' && task.source !== 'basic_needs' && remindAt && !task.google_event_id && <button onClick={() => syncTask(task)}>Add to Calendar</button>}{task.google_event_id && <span className="synced">Calendar linked</span>}</div></article>; })}</div></section>
     <section className="panel calendar-panel">
       <div className="section-heading"><h2>Google Calendar</h2><span className={calendarStatus.connected ? 'status good' : 'status'}>{calendarStatus.connected ? 'Connected' : 'Not connected'}</span></div>
       <label className="check-setting"><input type="checkbox" checked={settings.syncCalendar} onChange={e => updateSetting('syncCalendar', e.target.checked)} /> Ask before adding reminders to Google Calendar</label>

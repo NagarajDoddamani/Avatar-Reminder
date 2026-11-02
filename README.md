@@ -45,6 +45,12 @@ Events from selected calendars are imported into `calendar_events` and linked to
 
 Local reminders stay available when Google Calendar is disconnected. Completed reminders are archived one hour after completion; dismissed and cancelled reminders remain accessible under **All**. The scheduler runs while Avatar Reminder is open or minimized to the system tray. Choosing **Quit** stops the app, so reminders cannot fire while it is fully closed. Starting the app again rebuilds pending schedules and performs a calendar sync.
 
+## Basic Needs reminders
+
+Open **Basic Needs** from the top navigation to configure the predefined water, break, stretch, eye-rest, walking, posture, meal, sleep, exercise, and custom reminders. Drink Water is enabled initially with a 30-minute interval; the other templates start disabled. Each reminder can be edited, paused/resumed, or deleted. Schedules use the computer's local time and selected weekdays, including overnight time windows.
+
+Reminder definitions are stored in `basic_reminders`. The scheduler creates one durable task occurrence at a time in `tasks`, with a unique definition/schedule key to prevent duplicate occurrences after restart. Completing or dismissing an occurrence advances the definition to its next scheduled time. If the app misses a scheduled occurrence by more than five minutes, it marks that occurrence skipped and moves on rather than replaying a backlog. Snoozed occurrences remain tied to the same definition.
+
 ## Other limitations
 
 - OAuth tokens are encrypted with Electron `safeStorage` where available. On systems where encryption is unavailable, this starter stores the token data as base64 text; production builds should instead fail closed or implement a stronger secure token store.
@@ -65,3 +71,4 @@ Local reminders stay available when Google Calendar is disconnected. Completed r
 - `app_settings`: app preferences and encrypted OAuth token blob
 - `calendar_events`: source event metadata and stable calendar/event identifiers
 - `calendar_sync_state`: per-calendar incremental Google sync tokens
+- `basic_reminders`: persistent Basic Needs and user-created recurring reminder definitions

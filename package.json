@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "vite build",
-    "test": "node --test electron/calendar.test.cjs electron/reminders.test.cjs",
+    "test": "node --test electron/calendar.test.cjs electron/reminders.test.cjs electron/basic-needs.test.cjs",
     "start": "electron .",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },

@@ -88,6 +88,22 @@ function openDatabase(filePath) {
       sync_token TEXT NOT NULL,
       last_synced_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS basic_reminders (
+      id TEXT PRIMARY KEY,
+      template_key TEXT UNIQUE,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      interval_minutes INTEGER,
+      start_time TEXT NOT NULL DEFAULT '09:00',
+      end_time TEXT NOT NULL DEFAULT '21:00',
+      active_days TEXT NOT NULL DEFAULT '[0,1,2,3,4,5,6]',
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+      sound_enabled INTEGER NOT NULL DEFAULT 0 CHECK(sound_enabled IN (0,1)),
+      speak_enabled INTEGER NOT NULL DEFAULT 1 CHECK(speak_enabled IN (0,1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   // Add lifecycle columns safely to databases created by earlier versions.
   const taskColumns = new Set(db.pragma('table_info(tasks)').map(column => column.name));
@@ -101,6 +117,8 @@ function openDatabase(filePath) {
   for (const [column, definition] of Object.entries(additions)) {
     if (!taskColumns.has(column)) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} ${definition}`);
   }
+  if (!taskColumns.has('basic_reminder_id')) db.exec('ALTER TABLE tasks ADD COLUMN basic_reminder_id TEXT REFERENCES basic_reminders(id) ON DELETE SET NULL');
+  if (!taskColumns.has('basic_occurrence_key')) db.exec('ALTER TABLE tasks ADD COLUMN basic_occurrence_key TEXT');
   const eventColumns = new Set(db.pragma('table_info(calendar_events)').map(column => column.name));
   if (!eventColumns.has('event_timezone')) db.exec('ALTER TABLE calendar_events ADD COLUMN event_timezone TEXT');
   db.exec(`
@@ -114,6 +132,8 @@ function openDatabase(filePath) {
     WHERE lifecycle_status = 'scheduled';
     CREATE INDEX IF NOT EXISTS idx_tasks_lifecycle_due ON tasks(lifecycle_status, scheduled_reminder_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_external ON tasks(calendar_id, google_event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_basic_occurrence ON tasks(basic_reminder_id, basic_occurrence_key) WHERE basic_reminder_id IS NOT NULL AND basic_occurrence_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tasks_basic_active ON tasks(basic_reminder_id, lifecycle_status, scheduled_reminder_at);
   `);
   return db;
 }

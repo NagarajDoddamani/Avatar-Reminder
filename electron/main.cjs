@@ -4,7 +4,11 @@ const { pathToFileURL } = require('node:url');
 const { screen } = require('electron');
 const { openDatabase } = require('./store.cjs');
 const { createCalendarService } = require('./calendar.cjs');
-const { createLocalTask, claimDueTasks, respondToTask, archiveExpiredCompleted } = require('./reminders.cjs');
+const {
+  createLocalTask, claimDueTasks, respondToTask, archiveExpiredCompleted,
+  seedBasicNeedsReminders, ensureBasicNeedsOccurrences, listBasicNeedsReminders,
+  saveBasicReminder, setBasicReminderEnabled, deleteBasicReminder
+} = require('./reminders.cjs');
 
 let mainWindow;
 let avatarWindow;
@@ -156,6 +160,7 @@ function scheduleLoop() {
   reminderTimer = setInterval(() => {
     const archived = archiveExpiredCompleted(db);
     if (archived && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
+    ensureBasicNeedsOccurrences(db);
     if (isQuietHours()) return;
     const now = new Date().toISOString();
     const claimed = claimDueTasks(db, now);
@@ -163,6 +168,7 @@ function scheduleLoop() {
     if (claimed.length && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
   }, 15000);
   const archived = archiveExpiredCompleted(db);
+  ensureBasicNeedsOccurrences(db);
   const claimed = isQuietHours() ? [] : claimDueTasks(db);
   for (const task of claimed) showReminder(task);
   if (claimed.length && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
@@ -194,8 +200,28 @@ function registerIpc() {
     ORDER BY CASE lifecycle_status WHEN 'scheduled' THEN 0 WHEN 'snoozed' THEN 1 WHEN 'notified' THEN 2 WHEN 'due' THEN 2 ELSE 3 END,
     scheduled_reminder_at ASC, created_at DESC`).all());
   ipcMain.handle('tasks:create', (_event, input) => createLocalTask(db, input));
+  ipcMain.handle('basic-needs:list', () => listBasicNeedsReminders(db));
+  ipcMain.handle('basic-needs:save', (_event, input) => {
+    const reminder = saveBasicReminder(db, input);
+    ensureBasicNeedsOccurrences(db);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
+    return reminder;
+  });
+  ipcMain.handle('basic-needs:enabled', (_event, { id, enabled }) => {
+    const reminder = setBasicReminderEnabled(db, id, enabled);
+    ensureBasicNeedsOccurrences(db);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
+    return reminder;
+  });
+  ipcMain.handle('basic-needs:delete', (_event, id) => {
+    const deleted = deleteBasicReminder(db, id);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
+    return deleted;
+  });
   ipcMain.handle('tasks:respond', (_event, { id, response }) => {
     const updated = id === 'test' ? { id, lifecycle_status: response } : respondToTask(db, id, response);
+    ensureBasicNeedsOccurrences(db);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tasks:changed');
     const wasCurrent = currentReminderId === id;
     reminderQueue = reminderQueue.filter(task => task.id !== id);
     if (!wasCurrent && !currentReminderId) setTimeout(displayNextReminder, 100);
@@ -266,6 +292,7 @@ function registerIpc() {
 
 app.whenReady().then(() => {
   db = openDatabase(path.join(app.getPath('userData'), 'avatar-reminder.sqlite3'));
+  seedBasicNeedsReminders(db);
   calendar = createCalendarService({
     app,
     db,
